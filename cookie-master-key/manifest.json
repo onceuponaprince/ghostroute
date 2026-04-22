@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Cookie Master Key",
+  "version": "1.0",
+  "description": "Export cookies for our AI Swarm sub-agents.",
+  "permissions": ["cookies", "activeTab", "storage", "downloads"],
+  "host_permissions": ["<all_urls>"],
+  "action": {
+    "default_popup": "popup.html"
+  }
+}
