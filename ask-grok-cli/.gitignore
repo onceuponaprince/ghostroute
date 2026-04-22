@@ -1,0 +1,4 @@
+/target
+/config/*.json
+# Belt-and-suspenders: never leak session cookies even if moved
+grok.com-cookies.json
