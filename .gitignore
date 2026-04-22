@@ -1,0 +1,25 @@
+# Session cookies — never commit
+*-cookies.json
+
+# Node
+node_modules/
+dist/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+*.log
+*.bak
+*.tmp
+*.swp
+
+# Environment files
+*.env
+
+# Claude Code per-machine state (matched at any depth)
+**/.claude/settings.local.json
+**/.claude/.swarm-memory.json
+
+# Rust build output (defense-in-depth; ask-grok-cli/.gitignore also scopes this)
+ask-grok-cli/target/
