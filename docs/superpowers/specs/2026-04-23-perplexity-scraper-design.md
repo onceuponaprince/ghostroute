@@ -159,7 +159,7 @@ Output: the same JSON shape as the HTTP response, pretty-printed to stdout. Prog
 
 ```js
 {
-  answer: string,                    // inline [1][2] markers preserved
+  answer: string,                    // pure prose (Perplexity UI no longer renders inline citation markers — see §Revisions)
   sources: [
     { index: 1, title: string, url: string, domain: string, snippet?: string }
   ],
@@ -277,7 +277,6 @@ After implementation, the following should be true:
 
 - [ ] `POST /ask-perplexity { prompt: "what is 2+2" }` returns a valid
       structured payload within 90s.
-- [ ] The returned `answer` preserves inline `[1]` citation markers.
 - [ ] `sources[]` contains ≥1 entry with `{ index, title, url, domain }`.
 - [ ] Passing `threadId` from a prior response continues that thread (verify
       the model references prior turns).
@@ -296,3 +295,24 @@ After implementation, the following should be true:
       JSON output for a trivial prompt.
 - [ ] `parse.js` vitest suite passes against every fixture in `__fixtures__/`.
 - [ ] `providers/perplexity/__fixtures__/` is committed; cookie files are not.
+
+---
+
+## Revisions
+
+### 2026-04-24 — inline citation markers dropped
+
+Offline dissection of captured fixtures (auto-web, reasoning-web,
+deep-research-web) via `scripts/dissect-fixtures.mjs` found **zero**
+inline citation markers in the answer prose: no `[N]` text patterns,
+no `<a>` tags, no `<sup>` tags. Perplexity's current UI renders the
+answer as pure prose, with sources listed separately in the overlay
+panel (no numbered annotations in situ).
+
+**Change:** `answer` return-shape field is pure prose. Plan Task 6
+("parse.js — inline citation markers preserved") deleted. Verification
+checklist item removed.
+
+Sources still extracted fully and indexed 1..N in `sources[]` as before.
+Callers that need citation-style rendering can cross-reference sources
+by position or by content-matching titles against the answer text.

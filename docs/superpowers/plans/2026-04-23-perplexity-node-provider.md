@@ -4,7 +4,7 @@
 
 **Goal:** Ship a working `/ask-perplexity` HTTP surface (fast modes + Deep Research async job pattern + optional threading) backed by a `providers/perplexity/` module with parse-layer unit test coverage against captured HTML fixtures.
 
-**Architecture:** Node provider module under `providers/perplexity/` exposes `askPerplexity()` (synchronous, fast modes) and `askPerplexityDeep()` (async job lifecycle). `server.js` adds three endpoints. Structured output with inline citation markers preserved; raw HTML escape hatch opt-in. In-memory job store. See spec: `docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md`.
+**Architecture:** Node provider module under `providers/perplexity/` exposes `askPerplexity()` (synchronous, fast modes) and `askPerplexityDeep()` (async job lifecycle). `server.js` adds three endpoints. Structured output (pure prose answer + sources array + optional Deep Research steps); raw HTML escape hatch opt-in. In-memory job store. See spec: `docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md`.
 
 **Tech Stack:** Node.js (ESM), Playwright (browser), Cheerio (HTML parsing — already a dep), Vitest (test runner — to be added), Supertest (HTTP integration tests — to be added), Express 5.
 
@@ -159,7 +159,6 @@ While codegen is open, **write down the selectors you observed for**:
 - answer container
 - sources container
 - individual source item (title, url, snippet)
-- inline citation anchor
 - thread URL pattern (should be `/search/<uuid>`)
 
 These go into `selectors.js` in Task 10. Keep notes in a scratch file — do not commit it.
@@ -575,70 +574,17 @@ git commit -m "feat(perplexity): parse extracts sources array"
 
 ---
 
-## Task 6: `parse.js` — inline citation markers preserved
+## Task 6: DELETED — inline citation markers not applicable
 
-**Files:**
-- Modify: `providers/perplexity/parse.test.js`
-- (likely no code change needed if `.text()` already preserves `[1]` strings)
+Deleted 2026-04-24 after offline dissection of captured fixtures
+(auto-web, reasoning-web, deep-research-web) via
+`scripts/dissect-fixtures.mjs` found zero inline citation markers in
+Perplexity's answer prose (no `[N]` text, no `<a>`, no `<sup>`). The
+UI renders the answer as pure prose with sources listed separately.
+Spec amended under §Revisions. Skip to Task 7.
 
-- [ ] **Step 1: Add test asserting inline markers remain**
-
-Append to `providers/perplexity/parse.test.js`:
-
-```js
-describe('parse — inline citation markers', () => {
-  it('preserves [N] markers in answer text', () => {
-    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
-    expect(result.answer).toMatch(/\[\d+\]/);
-  });
-});
-```
-
-- [ ] **Step 2: Run test**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: PASS if Perplexity renders citations as inline text (common case). FAIL if citations are `<sup>` or `<a>` tags — in that case, go to Step 3.
-
-- [ ] **Step 3 (only if failed): Update answer extraction to render citation anchors as `[N]`**
-
-In `parse.js`, replace the answer extraction block:
-
-```js
-  const answerNode = $(SELECTORS.answerContainer).last();
-  if (answerNode.length === 0) {
-    throw new PerplexityParseError('answer container not found', html);
-  }
-  // Rewrite citation anchors like <a class="citation">1</a> into "[1]" text nodes
-  // before taking .text() so markers survive the text-stripping.
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
-  const answer = answerNode.text().trim();
-```
-
-Update `selectors.js` to add a `citationAnchor` entry if the real selector differs from the heuristic above.
-
-- [ ] **Step 4: Re-run and confirm pass**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: all tests PASS (7 total).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add providers/perplexity/parse.js providers/perplexity/parse.test.js providers/perplexity/selectors.js
-git commit -m "feat(perplexity): preserve inline [N] citation markers in answer"
-```
+No code work required. Task 7 below remains Task 7 — numbering preserved
+to avoid churning cross-references in PROGRESS.md and TaskCreate IDs.
 
 ---
 
@@ -706,11 +652,6 @@ export function parse(html, { url, mode } = {}) {
   if (answerNode.length === 0) {
     throw new PerplexityParseError('answer container not found', html);
   }
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -809,11 +750,6 @@ export function parse(html, { url, mode, raw = false } = {}) {
     throw new PerplexityParseError('answer container not found', html);
   }
   const answerHtml = raw ? $.html(answerNode) : undefined;
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -954,7 +890,6 @@ xdg-open providers/perplexity/__fixtures__/auto-web.html
 | `sourceTitle` | the source's title/headline text |
 | `sourceUrl` | the source's link |
 | `sourceSnippet` | the source's excerpt/snippet, if present |
-| `citationAnchor` | each inline `[N]` citation link inside the answer |
 | `stepItem` | (DR only) each step card |
 | `stepQuery` | (DR only) the search query text inside a step |
 | `stepPagesCount` | (DR only) the pages-visited number inside a step |
@@ -996,7 +931,6 @@ export const SELECTORS = {
   sourceTitle: 'FILL-IN-TASK-10',
   sourceUrl: 'FILL-IN-TASK-10',
   sourceSnippet: 'FILL-IN-TASK-10',
-  citationAnchor: 'FILL-IN-TASK-10',
   stepItem: 'FILL-IN-TASK-10',
   stepQuery: 'FILL-IN-TASK-10',
   stepPagesCount: 'FILL-IN-TASK-10',
