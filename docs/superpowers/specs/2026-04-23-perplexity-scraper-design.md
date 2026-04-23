@@ -153,6 +153,8 @@ ask-perplexity --raw "..."                       # include raw HTML in JSON outp
 
 Output: the same JSON shape as the HTTP response, pretty-printed to stdout. Progress updates (during `--deep`) print to stderr prefixed with `[progress]` so stdout stays pipe-safe for `| jq`.
 
+**`--deep` jobId behavior:** on start, the CLI generates a UUID v4 and prints `[job] <uuid>` to stderr, and includes it as a top-level `jobId` field in the final JSON. This is a correlation identifier for humans tailing logs — it is *not* a recovery handle (the Rust CLI runs its own browser; it does not use the HTTP server's job queue). The HTTP `/deep` endpoint's `jobId` is a true recovery handle; these two ids look the same but mean different things.
+
 ## Return shape
 
 ```js
@@ -194,7 +196,7 @@ Typed errors in `providers/perplexity/errors.js`:
 |-------|------|-------------|----------|
 | `PerplexityAuthError` | Login wall detected before prompt submission | 401 | Message: "refresh cookies at ~/.claude/cookie-configs/perplexity.ai-cookies.json" |
 | `PerplexityScrapeError` | Required selector not found | 502 | Attach `stage`, `selector`, and `html` (truncated to 4KB) for debugging |
-| `PerplexityTimeoutError` | Fast mode >90s end-to-end, or Deep Research >15min end-to-end (no progress update for 3min also trips it) | 504 | Attach `stage` (which wait timed out) |
+| `PerplexityTimeoutError` | Fast mode >3min end-to-end, or Deep Research >30min end-to-end (no progress update for 5min also trips it) | 504 | Attach `stage` (which wait timed out) |
 | `PerplexityParseError` | HTML present but parse failed | 502 *or* returns partial result with `parseError` field if `raw: true` | When caller opted in to `raw`, prefer returning raw HTML + parseError over throwing |
 
 **Never swallow errors silently.** Always log with enough context to reproduce
