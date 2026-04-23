@@ -8,7 +8,7 @@
 
 **Tech Stack:** Node.js (ESM), Playwright (browser), Cheerio (HTML parsing — already a dep), Vitest (test runner — to be added), Supertest (HTTP integration tests — to be added), Express 5.
 
-**Operational note:** Tasks 2, 11–14, and 20 require a live Perplexity Pro session with valid cookies at `~/.claude/cookie-configs/perplexity.ai-cookies.json`. Tasks 3–9 and 15–19 run offline against fixtures / mocks. Smoke-test tasks are gated by the `SMOKE=1` env var so a bare `pnpm test` never hits the network.
+**Operational note:** Tasks 2, 11–14, and 20 require a live Perplexity Pro session with valid cookies at `~/.claude/cookie-configs/perplexity.ai-cookies.json`. Tasks 3–9 and 15–19 run offline against fixtures / mocks. Smoke-test tasks are gated by the `SMOKE=1` env var so a bare `npm test` never hits the network.
 
 ---
 
@@ -48,10 +48,10 @@
 
 Run:
 ```bash
-pnpm add -D vitest supertest
+npm install -D vitest supertest
 ```
 
-Expected: `devDependencies` updated in `package.json`; `pnpm-lock.yaml` (or `package-lock.json`) regenerated.
+Expected: `devDependencies` updated in `package.json`; `package-lock.json` regenerated.
 
 - [ ] **Step 2: Update `package.json` scripts**
 
@@ -95,7 +95,7 @@ mkdir -p providers/perplexity/__fixtures__
 
 Run:
 ```bash
-pnpm test
+npm test
 ```
 
 Expected: output includes `No test files found` (or similar) and exit code 0 or 1 — either is fine, we just need to confirm vitest is callable.
@@ -103,7 +103,7 @@ Expected: output includes `No test files found` (or similar) and exit code 0 or 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add package.json pnpm-lock.yaml package-lock.json vitest.config.js providers/ 2>/dev/null
+git add package.json package-lock.json vitest.config.js providers/ 2>/dev/null
 git commit -m "chore: scaffold vitest + providers/perplexity/ directory"
 ```
 
@@ -258,7 +258,7 @@ describe('perplexity errors', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/errors.test.js
+npm test providers/perplexity/errors.test.js
 ```
 
 Expected: FAIL — module `./errors.js` does not exist.
@@ -309,7 +309,7 @@ export class PerplexityParseError extends Error {
 
 Run:
 ```bash
-pnpm test providers/perplexity/errors.test.js
+npm test providers/perplexity/errors.test.js
 ```
 
 Expected: PASS — 5 tests passing.
@@ -363,7 +363,7 @@ describe('parse — answer extraction', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: FAIL — module `./parse.js` does not exist.
@@ -416,7 +416,7 @@ export const SELECTORS = {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: PASS — 2 tests passing.
@@ -479,7 +479,7 @@ describe('parse — sources extraction', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: 4 new tests FAIL (sources empty); original 2 still PASS.
@@ -559,7 +559,7 @@ function extractSources($) {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: 6 tests PASS.
@@ -598,7 +598,7 @@ describe('parse — inline citation markers', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: PASS if Perplexity renders citations as inline text (common case). FAIL if citations are `<sup>` or `<a>` tags — in that case, go to Step 3.
@@ -628,7 +628,7 @@ Update `selectors.js` to add a `citationAnchor` entry if the real selector diffe
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: all tests PASS (7 total).
@@ -679,7 +679,7 @@ describe('parse — Deep Research steps', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: new Deep Research test FAILS, non-DR test PASSES (no steps field yet).
@@ -744,7 +744,7 @@ function extractSteps($) {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: all tests PASS.
@@ -791,7 +791,7 @@ describe('parse — raw HTML escape hatch', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: new tests FAIL (no `raw` field).
@@ -839,7 +839,7 @@ export function parse(html, { url, mode, raw = false } = {}) {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: all tests PASS.
@@ -888,7 +888,7 @@ describe('parse — threadId', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: new tests FAIL (threadId always null).
@@ -916,7 +916,7 @@ And in `parse()`, replace `threadId: null` with `threadId: extractThreadId(url)`
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: all tests PASS.
@@ -1019,7 +1019,7 @@ export const SELECTORS = {
 
 Run:
 ```bash
-pnpm test providers/perplexity/parse.test.js
+npm test providers/perplexity/parse.test.js
 ```
 
 Expected: all tests from Tasks 4–9 PASS against real selectors. If any fail, the selector you captured doesn't match the fixture — adjust.
@@ -1113,7 +1113,7 @@ export async function launchAndNavigate({ threadId } = {}) {
 
 Run:
 ```bash
-SMOKE=1 pnpm test providers/perplexity/scrape.test.js
+SMOKE=1 npm test providers/perplexity/scrape.test.js
 ```
 
 Expected: 1 test PASS (browser launches, navigates, closes).
@@ -1122,7 +1122,7 @@ Expected: 1 test PASS (browser launches, navigates, closes).
 
 Run:
 ```bash
-pnpm test providers/perplexity/scrape.test.js
+npm test providers/perplexity/scrape.test.js
 ```
 
 Expected: test is skipped (`skipIf` active).
@@ -1213,7 +1213,7 @@ export async function selectFocus(page, focus) {
 
 Run:
 ```bash
-SMOKE=1 pnpm test providers/perplexity/scrape.test.js
+SMOKE=1 npm test providers/perplexity/scrape.test.js
 ```
 
 Expected: 2 tests PASS.
@@ -1327,7 +1327,7 @@ import { PerplexityAuthError, PerplexityScrapeError, PerplexityTimeoutError } fr
 
 Run:
 ```bash
-SMOKE=1 pnpm test providers/perplexity/scrape.test.js
+SMOKE=1 npm test providers/perplexity/scrape.test.js
 ```
 
 Expected: all smoke tests PASS. Test duration ~30–60s for the full flow.
@@ -1407,7 +1407,7 @@ describe('askPerplexity', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/index.test.js
+npm test providers/perplexity/index.test.js
 ```
 
 Expected: FAIL — module `./index.js` not found.
@@ -1435,7 +1435,7 @@ export async function askPerplexity({ prompt, mode = 'auto', focus = 'web', thre
 
 Run:
 ```bash
-pnpm test providers/perplexity/index.test.js
+npm test providers/perplexity/index.test.js
 ```
 
 Expected: 3 tests PASS.
@@ -1515,7 +1515,7 @@ describe('POST /ask-perplexity', () => {
 
 Run:
 ```bash
-pnpm test server.test.js
+npm test server.test.js
 ```
 
 Expected: FAIL — either `app` is undefined on import or the endpoint returns 404.
@@ -1623,7 +1623,7 @@ if (isMainModule) {
 
 Run:
 ```bash
-pnpm test server.test.js
+npm test server.test.js
 ```
 
 Expected: 3 tests PASS.
@@ -1632,7 +1632,7 @@ Expected: 3 tests PASS.
 
 Run:
 ```bash
-pnpm start &
+npm start &
 sleep 1
 curl -s -X POST http://localhost:3005/ask-perplexity -H 'Content-Type: application/json' -d '{}'
 kill %1
@@ -1724,7 +1724,7 @@ describe('jobs — in-memory store', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/jobs.test.js
+npm test providers/perplexity/jobs.test.js
 ```
 
 Expected: FAIL — module `./jobs.js` does not exist.
@@ -1787,7 +1787,7 @@ export function createJobStore({ ttlMs = 24 * 60 * 60 * 1000 } = {}) {
 
 Run:
 ```bash
-pnpm test providers/perplexity/jobs.test.js
+npm test providers/perplexity/jobs.test.js
 ```
 
 Expected: 7 tests PASS.
@@ -1930,7 +1930,7 @@ describe('askPerplexityDeep', () => {
 
 Run:
 ```bash
-pnpm test providers/perplexity/index.test.js
+npm test providers/perplexity/index.test.js
 ```
 
 Expected: FAIL — `askPerplexityDeep` not exported.
@@ -1982,7 +1982,7 @@ export function askPerplexityDeep({ prompt, focus = 'web', threadId, raw = false
 
 Run:
 ```bash
-pnpm test providers/perplexity/index.test.js
+npm test providers/perplexity/index.test.js
 ```
 
 Expected: 5 tests PASS (3 from Task 14 + 2 new).
@@ -2041,7 +2041,7 @@ describe('POST /ask-perplexity/deep + GET /ask-perplexity/deep/:jobId', () => {
 
 Run:
 ```bash
-pnpm test server.test.js
+npm test server.test.js
 ```
 
 Expected: new tests FAIL (endpoints don't exist).
@@ -2089,7 +2089,7 @@ app.get('/ask-perplexity/deep/:jobId', (req, res) => {
 
 Run:
 ```bash
-pnpm test server.test.js
+npm test server.test.js
 ```
 
 Expected: 6 tests PASS (3 original + 3 new).
@@ -2098,7 +2098,7 @@ Expected: 6 tests PASS (3 original + 3 new).
 
 Run:
 ```bash
-pnpm test
+npm test
 ```
 
 Expected: all non-smoke tests PASS. No test is skipped other than the `SMOKE=1`-gated ones.
@@ -2123,7 +2123,7 @@ This task confirms the full stack works end-to-end against live Perplexity. It's
 
 Run:
 ```bash
-pnpm start
+npm start
 ```
 
 Expected: `🍺 The Tavern is open! Reverse API running on http://localhost:3005`
@@ -2276,7 +2276,7 @@ Cookies expected at `~/.claude/cookie-configs/perplexity.ai-cookies.json`
 
 Run:
 ```bash
-pnpm test
+npm test
 ```
 
 Expected: all tests PASS. No regression from the README edit.
