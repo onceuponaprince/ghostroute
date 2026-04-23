@@ -23,3 +23,6 @@ dist/
 
 # Rust build output (defense-in-depth; ask-grok-cli/.gitignore also scopes this)
 ask-grok-cli/target/
+
+# Git worktrees — isolated workspaces for feature branches
+.worktrees/
