@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { launchAndNavigate, selectModel, selectTool } from './scrape.js';
+import { launchAndNavigate, selectModel, selectTool, scrapeOnce } from './scrape.js';
 
 const smoke = process.env.SMOKE === '1';
 
@@ -51,4 +51,19 @@ describe.skipIf(!smoke)('scrape — tool selection (SMOKE=1)', () => {
       await browser.close();
     }
   }, 60_000);
+});
+
+describe.skipIf(!smoke)('scrape — full fast-path (SMOKE=1)', () => {
+  it('submits a trivial prompt and returns an answer-bearing HTML payload', async () => {
+    const { html, url } = await scrapeOnce({
+      prompt: 'who founded meta (formerly facebook)?',
+      model: 'best',
+      focus: 'web',
+    });
+    expect(typeof html).toBe('string');
+    expect(html.length).toBeGreaterThan(50_000);  // real app HTML is hundreds of KB
+    expect(url).toMatch(/perplexity\.ai\/search\//);
+    // The captured markdown-content div should have substantive answer text.
+    expect(html).toMatch(/markdown-content-/);
+  }, 240_000);
 });

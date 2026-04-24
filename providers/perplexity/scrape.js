@@ -2,9 +2,9 @@ import { chromium } from 'playwright';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
-import { PerplexityAuthError, PerplexityScrapeError } from './errors.js';
+import { PerplexityAuthError, PerplexityScrapeError, PerplexityTimeoutError } from './errors.js';
 import { SELECTORS, FOCUS_URLS } from './selectors.js';
-import { humanClick, humanPause } from './human.js';
+import { humanClick, humanPause, humanType } from './human.js';
 
 const COOKIE_PATH = path.join(os.homedir(), '.claude', 'cookie-configs', 'perplexity.ai-cookies.json');
 
@@ -113,5 +113,70 @@ export async function selectTool(page, tool) {
     await humanPause(page, 200, 500);
   } catch {
     throw new PerplexityScrapeError('select-tool', SELECTORS.toolsButton, await page.content());
+  }
+}
+
+const FAST_TIMEOUT_MS = 180_000;    // 3 min end-to-end
+const DEEP_TIMEOUT_MS = 1_800_000;  // 30 min end-to-end
+const NO_PROGRESS_MS = 300_000;     // 5 min, tripped if DR stops emitting progress
+
+// Adaptive completion detector: once the answer container appears, watch its
+// text length. When it stops growing for `stableMs` ms, we call it done.
+// Robust against UI changes because it doesn't rely on specific spinner
+// class names (those drift constantly).
+async function waitForAnswerStable(page, { totalTimeoutMs, stableMs }) {
+  const start = Date.now();
+  let lastLen = 0;
+  let lastChange = Date.now();
+
+  // First: wait for the answer container to even appear.
+  try {
+    await page.waitForSelector(SELECTORS.answerContainer, { timeout: 60_000 });
+  } catch {
+    throw new PerplexityTimeoutError('answer-not-rendered', 60_000);
+  }
+
+  while (Date.now() - start < totalTimeoutMs) {
+    const len = await page.locator(SELECTORS.answerContainer).last()
+      .evaluate((el) => (el.textContent || '').length)
+      .catch(() => 0);
+    if (len !== lastLen) {
+      lastLen = len;
+      lastChange = Date.now();
+    }
+    if (len > 0 && Date.now() - lastChange >= stableMs) {
+      return;
+    }
+    await page.waitForTimeout(800);
+  }
+  throw new PerplexityTimeoutError('answer-stable-total', totalTimeoutMs);
+}
+
+export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', threadId, onProgress } = {}) {
+  const { browser, page } = await launchAndNavigate({ focus, threadId });
+  try {
+    await selectModel(page, model);
+    await selectTool(page, tool);
+
+    const input = page.locator(SELECTORS.promptInput).first();
+    await humanClick(page, input);
+    await humanType(page, prompt);
+    await humanPause(page, 200, 500);
+    await page.keyboard.press(SELECTORS.submitKey);
+
+    const isDeep = tool === 'deep-research';
+    await waitForAnswerStable(page, {
+      totalTimeoutMs: isDeep ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS,
+      stableMs: isDeep ? 15_000 : 3_000,
+    });
+
+    // Optional extra settle for DR so late citations/steps land.
+    if (isDeep) await humanPause(page, 2_000, 4_000);
+
+    const html = await page.content();
+    const url = page.url();
+    return { html, url };
+  } finally {
+    await browser.close();
   }
 }
