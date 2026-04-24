@@ -46,3 +46,24 @@ describe('parse — sources extraction', () => {
     });
   });
 });
+
+describe('parse — Deep Research steps', () => {
+  it('extracts steps[] from deep-research fixture', () => {
+    const result = parse(fixture('deep-research-web.html'), {
+      url: 'https://perplexity.ai/search/xyz',
+      mode: 'deep-research',
+    });
+    expect(Array.isArray(result.steps)).toBe(true);
+    expect(result.steps.length).toBeGreaterThanOrEqual(1);
+    const validPhases = ['identifying', 'searching', 'insights', 'other'];
+    for (const step of result.steps) {
+      expect(typeof step.query).toBe('string');
+      expect(validPhases).toContain(step.phase);
+    }
+  });
+
+  it('non-deep-research modes return no steps field', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
+    expect(result.steps).toBeUndefined();
+  });
+});
