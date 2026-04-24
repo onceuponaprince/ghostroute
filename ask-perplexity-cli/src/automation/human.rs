@@ -14,10 +14,47 @@ pub async fn human_pause(min_ms: u64, max_ms: u64) {
     sleep(Duration::from_millis(delay)).await;
 }
 
+/// Replace Unicode punctuation that chromiumoxide's `press_key` can't
+/// find in its key-definition table with the closest ASCII equivalent.
+/// Returns the sanitized string and a flag indicating whether any
+/// substitution was made. Without this, a prompt containing an em-dash
+/// like "A — B" errors out with "Key not found: —" before the browser
+/// even reaches Perplexity. Playwright handles this transparently via
+/// `Input.insertText`; chromiumoxide 0.7 dispatches per-char KeyEvents.
+pub fn sanitize_for_typing(text: &str) -> (String, bool) {
+    let mut out = String::with_capacity(text.len());
+    let mut changed = false;
+    for ch in text.chars() {
+        let replacement: Option<&'static str> = match ch {
+            '\u{2014}' | '\u{2013}' | '\u{2212}' => Some("-"),
+            '\u{201C}' | '\u{201D}' | '\u{201E}' | '\u{201F}' => Some("\""),
+            '\u{2018}' | '\u{2019}' | '\u{201A}' | '\u{201B}' => Some("'"),
+            '\u{2026}' => Some("..."),
+            '\u{00A0}' => Some(" "),
+            _ => None,
+        };
+        if let Some(rep) = replacement {
+            out.push_str(rep);
+            changed = true;
+        } else {
+            out.push(ch);
+        }
+    }
+    (out, changed)
+}
+
 /// Type `text` into `element` with per-char delay jitter, occasional
 /// pauses, and a small rate of typo-then-backspace corrections.
 /// Mirrors providers/perplexity/human.js#humanType from Plan 1.
 pub async fn human_type(element: &Element, text: &str) -> Result<()> {
+    let (text_owned, changed) = sanitize_for_typing(text);
+    if changed {
+        eprintln!(
+            "[warn] prompt contained Unicode punctuation chromiumoxide can't type; \
+             replaced em/en-dashes -> '-', curly quotes -> straight, ellipsis -> '...'"
+        );
+    }
+    let text = text_owned.as_str();
     const NEARBY: &[(&str, &str)] = &[
         ("a", "s"), ("s", "d"), ("d", "f"), ("f", "g"), ("g", "h"),
         ("h", "j"), ("j", "k"), ("k", "l"), ("q", "w"), ("w", "e"),
@@ -120,4 +157,52 @@ pub async fn human_click(page: &chromiumoxide::Page, element: &Element) -> Resul
     )
     .await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::sanitize_for_typing;
+
+    #[test]
+    fn ascii_passes_through_unchanged() {
+        let (out, changed) = sanitize_for_typing("hello, world! (2+2)=4");
+        assert_eq!(out, "hello, world! (2+2)=4");
+        assert!(!changed);
+    }
+
+    #[test]
+    fn em_dash_and_en_dash_become_hyphen() {
+        let (out, changed) = sanitize_for_typing("A \u{2014} B \u{2013} C");
+        assert_eq!(out, "A - B - C");
+        assert!(changed);
+    }
+
+    #[test]
+    fn curly_quotes_become_straight() {
+        let (out, changed) = sanitize_for_typing("\u{201C}hi\u{201D} he said, \u{2018}ok\u{2019}.");
+        assert_eq!(out, "\"hi\" he said, 'ok'.");
+        assert!(changed);
+    }
+
+    #[test]
+    fn ellipsis_expands() {
+        let (out, changed) = sanitize_for_typing("wait\u{2026}");
+        assert_eq!(out, "wait...");
+        assert!(changed);
+    }
+
+    #[test]
+    fn nbsp_becomes_space() {
+        let (out, changed) = sanitize_for_typing("a\u{00A0}b");
+        assert_eq!(out, "a b");
+        assert!(changed);
+    }
+
+    #[test]
+    fn mixed_realistic_prompt() {
+        let input = "'Attention Is All You Need' \u{2014} Vaswani et al. (2017) \u{2013} one paragraph\u{2026}";
+        let (out, changed) = sanitize_for_typing(input);
+        assert_eq!(out, "'Attention Is All You Need' - Vaswani et al. (2017) - one paragraph...");
+        assert!(changed);
+    }
 }
