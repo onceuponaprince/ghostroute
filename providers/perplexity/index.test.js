@@ -12,6 +12,7 @@ vi.mock('./scrape.js', () => ({
 
 const { scrapeOnce } = await import('./scrape.js');
 const { askPerplexity } = await import('./index.js');
+import { createJobStore } from './jobs.js';
 
 describe('askPerplexity', () => {
   it('returns parsed structured result', async () => {
@@ -65,5 +66,42 @@ describe('askPerplexity', () => {
     const result = await askPerplexity({ prompt: 'x', tool: 'deep-research' });
     expect(Array.isArray(result.steps)).toBe(true);
     expect(result.steps.length).toBeGreaterThanOrEqual(1);
+  });
+});
+
+describe('askPerplexityDeep', () => {
+  it('immediately returns jobId; job transitions queued → running → done', async () => {
+    const { askPerplexityDeep } = await import('./index.js');
+    const store = createJobStore();
+    scrapeOnce.mockImplementationOnce(async ({ onProgress }) => {
+      onProgress?.('Searching 3 sources');
+      return {
+        html: fixture('deep-research-web.html'),
+        url: 'https://www.perplexity.ai/search/deep-thread',
+      };
+    });
+
+    const { jobId } = askPerplexityDeep({ prompt: 'x', store });
+    expect(store.get(jobId).status).toBe('queued');
+
+    // Wait for completion (poll up to ~500ms)
+    for (let i = 0; i < 50 && store.get(jobId).status !== 'done'; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    const final = store.get(jobId);
+    expect(final.status).toBe('done');
+    expect(final.result.threadId).toBe('deep-thread');
+  });
+
+  it('on scrape failure the job status becomes failed', async () => {
+    const { askPerplexityDeep } = await import('./index.js');
+    const store = createJobStore();
+    scrapeOnce.mockRejectedValueOnce(new Error('scrape boom'));
+
+    const { jobId } = askPerplexityDeep({ prompt: 'x', store });
+    for (let i = 0; i < 50 && store.get(jobId).status !== 'failed'; i++) {
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    expect(store.get(jobId)).toMatchObject({ status: 'failed', error: 'scrape boom' });
   });
 });

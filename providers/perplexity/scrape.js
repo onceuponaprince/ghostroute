@@ -124,10 +124,11 @@ const NO_PROGRESS_MS = 300_000;     // 5 min, tripped if DR stops emitting progr
 // text length. When it stops growing for `stableMs` ms, we call it done.
 // Robust against UI changes because it doesn't rely on specific spinner
 // class names (those drift constantly).
-async function waitForAnswerStable(page, { totalTimeoutMs, stableMs }) {
+async function waitForAnswerStable(page, { totalTimeoutMs, stableMs, onProgress }) {
   const start = Date.now();
   let lastLen = 0;
   let lastChange = Date.now();
+  let lastPhaseCount = 0;
 
   // First: wait for the answer container to even appear.
   try {
@@ -144,6 +145,17 @@ async function waitForAnswerStable(page, { totalTimeoutMs, stableMs }) {
       lastLen = len;
       lastChange = Date.now();
     }
+
+    // Progress events: fire onProgress whenever a new markdown-content phase
+    // appears (DR generates multiple answer blocks as it works).
+    if (onProgress) {
+      const phaseCount = await page.locator(SELECTORS.answerContainer).count().catch(() => 0);
+      if (phaseCount > lastPhaseCount) {
+        lastPhaseCount = phaseCount;
+        onProgress(`phase ${phaseCount}`);
+      }
+    }
+
     if (len > 0 && Date.now() - lastChange >= stableMs) {
       return;
     }
@@ -168,6 +180,7 @@ export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', 
     await waitForAnswerStable(page, {
       totalTimeoutMs: isDeep ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS,
       stableMs: isDeep ? 15_000 : 3_000,
+      onProgress,
     });
 
     // Optional extra settle for DR so late citations/steps land.
