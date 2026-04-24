@@ -437,7 +437,9 @@ git commit -m "feat(perplexity): parse extracts answer from fixture"
 **Files:**
 - Modify: `providers/perplexity/parse.js`
 - Modify: `providers/perplexity/parse.test.js`
-- Modify: `providers/perplexity/selectors.js`
+
+(`selectors.js` was populated in Task 10 with real values — `sourceItem`,
+`sourceTitle`, `sourceSnippet` are already in place. Do not modify it.)
 
 - [ ] **Step 1: Extend test file with sources assertions**
 
@@ -467,11 +469,6 @@ describe('parse — sources extraction', () => {
       expect(s.index).toBe(i + 1);
     });
   });
-
-  it('writing-focus fixture yields empty sources array', () => {
-    const result = parse(fixture('writing-focus.html'), { url: 'https://perplexity.ai/search/abc' });
-    expect(result.sources).toEqual([]);
-  });
 });
 ```
 
@@ -482,29 +479,13 @@ Run:
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: 4 new tests FAIL (sources empty); original 2 still PASS.
+Expected: 3 new tests FAIL (sources always empty from Task 4); original 2 still PASS.
 
-- [ ] **Step 3: Add source selectors to `selectors.js`**
+- [ ] **Step 3: Implement sources extraction in `parse.js`**
 
-Replace `providers/perplexity/selectors.js` with:
-
-```js
-// Perplexity DOM selectors — the fragile layer.
-// Prefer data-testid and aria-label over class names.
-// Update here (and only here) when Perplexity ships a UI change.
-export const SELECTORS = {
-  answerContainer: 'div.prose',         // TODO(Task 10): confirm from fixtures
-  sourcesContainer: '[data-testid="sources-list"]', // TODO(Task 10)
-  sourceItem: '[data-testid="source-item"]',         // TODO(Task 10)
-  sourceTitle: '.source-title',                       // TODO(Task 10)
-  sourceUrl: 'a[href]',                               // TODO(Task 10)
-  sourceSnippet: '.source-snippet',                   // TODO(Task 10)
-};
-```
-
-- [ ] **Step 4: Implement sources extraction in `parse.js`**
-
-Replace `parse.js` with:
+Sources in Perplexity's DOM: each source card is an `<a href>` whose own
+href is the source URL. Inside it are two spans — title and snippet —
+identifiable by Tailwind utility classes. Replace `parse.js` with:
 
 ```js
 import * as cheerio from 'cheerio';
@@ -539,32 +520,34 @@ function extractSources($) {
   const out = [];
   items.each((i, el) => {
     const $el = $(el);
-    const linkHref = $el.find(SELECTORS.sourceUrl).first().attr('href');
-    if (!linkHref) return;
+    const href = $el.attr('href');
+    if (!href) return;
     let domain = '';
     try {
-      domain = new URL(linkHref).hostname;
+      domain = new URL(href).hostname;
     } catch {
       return;
     }
     const title = $el.find(SELECTORS.sourceTitle).first().text().trim() || domain;
     const snippet = $el.find(SELECTORS.sourceSnippet).first().text().trim() || undefined;
-    out.push({ index: i + 1, title, url: linkHref, domain, snippet });
+    out.push({ index: i + 1, title, url: href, domain, snippet });
   });
   return out;
 }
 ```
 
-- [ ] **Step 5: Run tests — all 6 should pass**
+Note: `sourceItem` is already the `<a>` tag (see Task 10 selectors —
+`[class*="group/search-side-content"] a[href]`). Extract its own `href`
+directly; no nested URL lookup is needed.
+
+- [ ] **Step 4: Run tests — all 5 should pass**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: 6 tests PASS.
-
-If sources tests fail because placeholder selectors don't match the fixture, inspect the fixture and update `selectors.js`. The extraction logic above is correct; only the selector strings change.
+Expected: 5 tests PASS (2 from Task 4 + 3 new).
 
 - [ ] **Step 6: Commit**
 
@@ -575,70 +558,17 @@ git commit -m "feat(perplexity): parse extracts sources array"
 
 ---
 
-## Task 6: `parse.js` — inline citation markers preserved
+## Task 6: DELETED — inline citation markers not applicable
 
-**Files:**
-- Modify: `providers/perplexity/parse.test.js`
-- (likely no code change needed if `.text()` already preserves `[1]` strings)
+Deleted 2026-04-24 after offline dissection of captured fixtures
+(auto-web, reasoning-web, deep-research-web) via
+`scripts/dissect-fixtures.mjs` found zero inline citation markers in
+Perplexity's answer prose (no `[N]` text, no `<a>`, no `<sup>`). The
+UI renders the answer as pure prose with sources listed separately.
+Spec amended under §Revisions. Skip to Task 7.
 
-- [ ] **Step 1: Add test asserting inline markers remain**
-
-Append to `providers/perplexity/parse.test.js`:
-
-```js
-describe('parse — inline citation markers', () => {
-  it('preserves [N] markers in answer text', () => {
-    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
-    expect(result.answer).toMatch(/\[\d+\]/);
-  });
-});
-```
-
-- [ ] **Step 2: Run test**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: PASS if Perplexity renders citations as inline text (common case). FAIL if citations are `<sup>` or `<a>` tags — in that case, go to Step 3.
-
-- [ ] **Step 3 (only if failed): Update answer extraction to render citation anchors as `[N]`**
-
-In `parse.js`, replace the answer extraction block:
-
-```js
-  const answerNode = $(SELECTORS.answerContainer).last();
-  if (answerNode.length === 0) {
-    throw new PerplexityParseError('answer container not found', html);
-  }
-  // Rewrite citation anchors like <a class="citation">1</a> into "[1]" text nodes
-  // before taking .text() so markers survive the text-stripping.
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
-  const answer = answerNode.text().trim();
-```
-
-Update `selectors.js` to add a `citationAnchor` entry if the real selector differs from the heuristic above.
-
-- [ ] **Step 4: Re-run and confirm pass**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: all tests PASS (7 total).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add providers/perplexity/parse.js providers/perplexity/parse.test.js providers/perplexity/selectors.js
-git commit -m "feat(perplexity): preserve inline [N] citation markers in answer"
-```
+No code work required. Task 7 below remains Task 7 — numbering preserved
+to avoid churning cross-references in PROGRESS.md and TaskCreate IDs.
 
 ---
 
@@ -709,11 +639,6 @@ export function parse(html, { url, mode } = {}) {
   if (answerNode.length === 0) {
     throw new PerplexityParseError('answer container not found', html);
   }
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -819,11 +744,6 @@ export function parse(html, { url, mode, raw = false } = {}) {
     throw new PerplexityParseError('answer container not found', html);
   }
   const answerHtml = raw ? $.html(answerNode) : undefined;
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -1146,7 +1066,7 @@ git commit -m "feat(perplexity): scrape launches browser with cookies and naviga
 
 ---
 
-## Task 12: `scrape.js` — mode and focus selection
+## Task 12: `scrape.js` — mode selection (focus is URL-based in Task 11)
 
 **Files:**
 - Modify: `providers/perplexity/scrape.js`
