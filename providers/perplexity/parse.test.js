@@ -84,3 +84,22 @@ describe('parse — raw HTML escape hatch', () => {
     expect(typeof result.raw.sourcesHtml).toBe('string');
   });
 });
+
+describe('parse — threadId', () => {
+  it('extracts threadId from /search/<uuid> URL', () => {
+    const result = parse(fixture('auto-web.html'), {
+      url: 'https://www.perplexity.ai/search/abc-123-uuid',
+    });
+    expect(result.threadId).toBe('abc-123-uuid');
+  });
+
+  it('returns null threadId when URL lacks /search/ segment', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://www.perplexity.ai/' });
+    expect(result.threadId).toBeNull();
+  });
+
+  it('returns null threadId when url option is omitted', () => {
+    const result = parse(fixture('auto-web.html'));
+    expect(result.threadId).toBeNull();
+  });
+});

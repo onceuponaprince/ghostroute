@@ -2,6 +2,17 @@ import * as cheerio from 'cheerio';
 import { PerplexityParseError } from './errors.js';
 import { SELECTORS, PHASE_BY_ICON } from './selectors.js';
 
+function extractThreadId(url) {
+  if (!url) return null;
+  try {
+    const u = new URL(url);
+    const m = u.pathname.match(/^\/search\/([^/?#]+)/);
+    return m ? m[1] : null;
+  } catch {
+    return null;
+  }
+}
+
 export function parse(html, { url, mode, raw = false } = {}) {
   const $ = cheerio.load(html);
 
@@ -19,7 +30,7 @@ export function parse(html, { url, mode, raw = false } = {}) {
   const sourcesHtml = raw ? (sourcesNode.length ? $.html(sourcesNode) : '') : undefined;
 
   const sources = extractSources($);
-  const result = { answer, sources, threadId: null };
+  const result = { answer, sources, threadId: extractThreadId(url) };
 
   if (mode === 'deep-research') {
     result.steps = extractSteps($);
