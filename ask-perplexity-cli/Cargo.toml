@@ -1,0 +1,27 @@
+[package]
+name = "ask-perplexity-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Native Rust CLI for Perplexity.ai via chromiumoxide"
+
+[dependencies]
+anyhow = "1.0.102"
+chromiumoxide = { version = "0.7", features = ["tokio-runtime"] }
+clap = { version = "4.6.1", features = ["derive"] }
+futures = "0.3"
+rand = "0.10.1"
+scraper = "0.23"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+thiserror = "1.0"
+tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
+url = "2.5"
+uuid = { version = "1.11", features = ["v4"] }
+
+[[bin]]
+name = "ask-perplexity-cli"
+path = "src/main.rs"
+
+[lib]
+name = "ask_perplexity_cli"
+path = "src/lib.rs"
