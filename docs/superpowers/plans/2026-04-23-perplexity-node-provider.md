@@ -577,9 +577,11 @@ to avoid churning cross-references in PROGRESS.md and TaskCreate IDs.
 **Files:**
 - Modify: `providers/perplexity/parse.test.js`
 - Modify: `providers/perplexity/parse.js`
-- Modify: `providers/perplexity/selectors.js`
 
-- [ ] **Step 1: Add failing test for steps**
+(`selectors.js` already contains `stepItem`, `stepQuery`, `stepPhaseIcon` and
+exports `PHASE_BY_ICON` — populated in Task 10. Do not modify it.)
+
+- [ ] **Step 1: Add failing tests for steps**
 
 Append to `providers/perplexity/parse.test.js`:
 
@@ -606,32 +608,24 @@ describe('parse — Deep Research steps', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect failure on first test**
+- [ ] **Step 2: Run — expect first new test to fail**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: new Deep Research test FAILS, non-DR test PASSES (no steps field yet).
+Expected: the `extracts steps[] from deep-research fixture` test FAILS (no steps field yet). The `non-deep-research modes return no steps field` test PASSES (no steps field = undefined = correct).
 
-- [ ] **Step 3: Add steps selectors**
+- [ ] **Step 3: Implement steps extraction in `parse.js`**
 
-Append to `providers/perplexity/selectors.js` inside the `SELECTORS` object:
-
-```js
-  // Step items: buttons containing the distinctive text class cascade.
-  stepItem: 'button:has(div.font-sans.text-quiet.text-sm.select-none.truncate)',
-  stepQuery: 'div.font-sans.text-quiet.text-sm.select-none.truncate',
-  // Phase is derived from the <svg use> xlink:href; no text-based selector needed.
-  stepPhaseIcon: 'svg use',
-```
-
-- [ ] **Step 4: Implement steps extraction**
-
-In `parse.js`, update the `parse` function:
+Replace the entire contents of `providers/perplexity/parse.js` with:
 
 ```js
+import * as cheerio from 'cheerio';
+import { PerplexityParseError } from './errors.js';
+import { SELECTORS, PHASE_BY_ICON } from './selectors.js';
+
 export function parse(html, { url, mode } = {}) {
   const $ = cheerio.load(html);
 
@@ -654,11 +648,27 @@ export function parse(html, { url, mode } = {}) {
   return result;
 }
 
-const PHASE_BY_ICON = {
-  '#pplx-icon-blocks': 'identifying',
-  '#pplx-icon-world-search': 'searching',
-  '#pplx-icon-bolt': 'insights',
-};
+function extractSources($) {
+  const items = $(SELECTORS.sourceItem);
+  if (items.length === 0) return [];
+
+  const out = [];
+  items.each((i, el) => {
+    const $el = $(el);
+    const href = $el.attr('href');
+    if (!href) return;
+    let domain = '';
+    try {
+      domain = new URL(href).hostname;
+    } catch {
+      return;
+    }
+    const title = $el.find(SELECTORS.sourceTitle).first().text().trim() || domain;
+    const snippet = $el.find(SELECTORS.sourceSnippet).first().text().trim() || undefined;
+    out.push({ index: i + 1, title, url: href, domain, snippet });
+  });
+  return out;
+}
 
 function extractSteps($) {
   const items = $(SELECTORS.stepItem);
@@ -666,8 +676,8 @@ function extractSteps($) {
   items.each((_, el) => {
     const $el = $(el);
     const query = $el.find(SELECTORS.stepQuery).first().text().trim();
-    const iconRef = $el.find(SELECTORS.stepPhaseIcon).first().attr('xlink:href')
-      || $el.find(SELECTORS.stepPhaseIcon).first().attr('href');
+    const iconEl = $el.find(SELECTORS.stepPhaseIcon).first();
+    const iconRef = iconEl.attr('xlink:href') || iconEl.attr('href');
     const phase = PHASE_BY_ICON[iconRef] || 'other';
     if (query) out.push({ query, phase });
   });
@@ -675,19 +685,23 @@ function extractSteps($) {
 }
 ```
 
-- [ ] **Step 5: Run — all tests pass**
+Note: `PHASE_BY_ICON` is imported from `selectors.js` (already exported there);
+do not define a local copy in `parse.js`. The `iconEl` helper avoids calling
+`.find(...)` twice.
+
+- [ ] **Step 4: Run — all tests pass**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: all tests PASS.
+Expected: 7 tests PASS (2 from Task 4 + 3 from Task 5 + 2 new).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add providers/perplexity/parse.js providers/perplexity/parse.test.js providers/perplexity/selectors.js
+git add providers/perplexity/parse.js providers/perplexity/parse.test.js
 git commit -m "feat(perplexity): parse extracts Deep Research steps"
 ```
 
