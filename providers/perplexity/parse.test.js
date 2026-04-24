@@ -21,3 +21,28 @@ describe('parse — answer extraction', () => {
     expect(answer).toMatch(/zuckerberg|meta|facebook/);
   });
 });
+
+describe('parse — sources extraction', () => {
+  it('extracts at least one source from auto-web fixture', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
+    expect(Array.isArray(result.sources)).toBe(true);
+    expect(result.sources.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('each source has index, title, url, domain', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
+    for (const source of result.sources) {
+      expect(typeof source.index).toBe('number');
+      expect(typeof source.title).toBe('string');
+      expect(source.url).toMatch(/^https?:\/\//);
+      expect(source.domain).toMatch(/\./);
+    }
+  });
+
+  it('source indices are 1-based and sequential', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
+    result.sources.forEach((s, i) => {
+      expect(s.index).toBe(i + 1);
+    });
+  });
+});

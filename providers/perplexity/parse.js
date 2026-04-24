@@ -14,9 +14,33 @@ export function parse(html, { url } = {}) {
     throw new PerplexityParseError('answer container empty', html);
   }
 
+  const sources = extractSources($);
+
   return {
     answer,
-    sources: [],
+    sources,
     threadId: null,
   };
+}
+
+function extractSources($) {
+  const items = $(SELECTORS.sourceItem);
+  if (items.length === 0) return [];
+
+  const out = [];
+  items.each((i, el) => {
+    const $el = $(el);
+    const href = $el.attr('href');
+    if (!href) return;
+    let domain = '';
+    try {
+      domain = new URL(href).hostname;
+    } catch {
+      return;
+    }
+    const title = $el.find(SELECTORS.sourceTitle).first().text().trim() || domain;
+    const snippet = $el.find(SELECTORS.sourceSnippet).first().text().trim() || undefined;
+    out.push({ index: i + 1, title, url: href, domain, snippet });
+  });
+  return out;
 }
