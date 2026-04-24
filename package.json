@@ -6,7 +6,9 @@
   "scripts": {
     "start": "node server.js",
     "ask": "node grok-reverse-api-grok-main.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e:perplexity": "SMOKE=1 vitest run providers/perplexity/scrape.test.js"
   },
   "keywords": [],
   "author": "",
@@ -19,5 +21,9 @@
     "playwright": "^1.59.1",
     "puppeteer-extra": "^3.3.6",
     "puppeteer-extra-plugin-stealth": "^2.11.2"
+  },
+  "devDependencies": {
+    "supertest": "^7.2.2",
+    "vitest": "^4.1.5"
   }
 }

@@ -437,7 +437,9 @@ git commit -m "feat(perplexity): parse extracts answer from fixture"
 **Files:**
 - Modify: `providers/perplexity/parse.js`
 - Modify: `providers/perplexity/parse.test.js`
-- Modify: `providers/perplexity/selectors.js`
+
+(`selectors.js` was populated in Task 10 with real values — `sourceItem`,
+`sourceTitle`, `sourceSnippet` are already in place. Do not modify it.)
 
 - [ ] **Step 1: Extend test file with sources assertions**
 
@@ -467,11 +469,6 @@ describe('parse — sources extraction', () => {
       expect(s.index).toBe(i + 1);
     });
   });
-
-  it('writing-focus fixture yields empty sources array', () => {
-    const result = parse(fixture('writing-focus.html'), { url: 'https://perplexity.ai/search/abc' });
-    expect(result.sources).toEqual([]);
-  });
 });
 ```
 
@@ -482,29 +479,13 @@ Run:
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: 4 new tests FAIL (sources empty); original 2 still PASS.
+Expected: 3 new tests FAIL (sources always empty from Task 4); original 2 still PASS.
 
-- [ ] **Step 3: Add source selectors to `selectors.js`**
+- [ ] **Step 3: Implement sources extraction in `parse.js`**
 
-Replace `providers/perplexity/selectors.js` with:
-
-```js
-// Perplexity DOM selectors — the fragile layer.
-// Prefer data-testid and aria-label over class names.
-// Update here (and only here) when Perplexity ships a UI change.
-export const SELECTORS = {
-  answerContainer: 'div.prose',         // TODO(Task 10): confirm from fixtures
-  sourcesContainer: '[data-testid="sources-list"]', // TODO(Task 10)
-  sourceItem: '[data-testid="source-item"]',         // TODO(Task 10)
-  sourceTitle: '.source-title',                       // TODO(Task 10)
-  sourceUrl: 'a[href]',                               // TODO(Task 10)
-  sourceSnippet: '.source-snippet',                   // TODO(Task 10)
-};
-```
-
-- [ ] **Step 4: Implement sources extraction in `parse.js`**
-
-Replace `parse.js` with:
+Sources in Perplexity's DOM: each source card is an `<a href>` whose own
+href is the source URL. Inside it are two spans — title and snippet —
+identifiable by Tailwind utility classes. Replace `parse.js` with:
 
 ```js
 import * as cheerio from 'cheerio';
@@ -539,32 +520,34 @@ function extractSources($) {
   const out = [];
   items.each((i, el) => {
     const $el = $(el);
-    const linkHref = $el.find(SELECTORS.sourceUrl).first().attr('href');
-    if (!linkHref) return;
+    const href = $el.attr('href');
+    if (!href) return;
     let domain = '';
     try {
-      domain = new URL(linkHref).hostname;
+      domain = new URL(href).hostname;
     } catch {
       return;
     }
     const title = $el.find(SELECTORS.sourceTitle).first().text().trim() || domain;
     const snippet = $el.find(SELECTORS.sourceSnippet).first().text().trim() || undefined;
-    out.push({ index: i + 1, title, url: linkHref, domain, snippet });
+    out.push({ index: i + 1, title, url: href, domain, snippet });
   });
   return out;
 }
 ```
 
-- [ ] **Step 5: Run tests — all 6 should pass**
+Note: `sourceItem` is already the `<a>` tag (see Task 10 selectors —
+`[class*="group/search-side-content"] a[href]`). Extract its own `href`
+directly; no nested URL lookup is needed.
+
+- [ ] **Step 4: Run tests — all 5 should pass**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: 6 tests PASS.
-
-If sources tests fail because placeholder selectors don't match the fixture, inspect the fixture and update `selectors.js`. The extraction logic above is correct; only the selector strings change.
+Expected: 5 tests PASS (2 from Task 4 + 3 new).
 
 - [ ] **Step 6: Commit**
 
@@ -575,70 +558,17 @@ git commit -m "feat(perplexity): parse extracts sources array"
 
 ---
 
-## Task 6: `parse.js` — inline citation markers preserved
+## Task 6: DELETED — inline citation markers not applicable
 
-**Files:**
-- Modify: `providers/perplexity/parse.test.js`
-- (likely no code change needed if `.text()` already preserves `[1]` strings)
+Deleted 2026-04-24 after offline dissection of captured fixtures
+(auto-web, reasoning-web, deep-research-web) via
+`scripts/dissect-fixtures.mjs` found zero inline citation markers in
+Perplexity's answer prose (no `[N]` text, no `<a>`, no `<sup>`). The
+UI renders the answer as pure prose with sources listed separately.
+Spec amended under §Revisions. Skip to Task 7.
 
-- [ ] **Step 1: Add test asserting inline markers remain**
-
-Append to `providers/perplexity/parse.test.js`:
-
-```js
-describe('parse — inline citation markers', () => {
-  it('preserves [N] markers in answer text', () => {
-    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
-    expect(result.answer).toMatch(/\[\d+\]/);
-  });
-});
-```
-
-- [ ] **Step 2: Run test**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: PASS if Perplexity renders citations as inline text (common case). FAIL if citations are `<sup>` or `<a>` tags — in that case, go to Step 3.
-
-- [ ] **Step 3 (only if failed): Update answer extraction to render citation anchors as `[N]`**
-
-In `parse.js`, replace the answer extraction block:
-
-```js
-  const answerNode = $(SELECTORS.answerContainer).last();
-  if (answerNode.length === 0) {
-    throw new PerplexityParseError('answer container not found', html);
-  }
-  // Rewrite citation anchors like <a class="citation">1</a> into "[1]" text nodes
-  // before taking .text() so markers survive the text-stripping.
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
-  const answer = answerNode.text().trim();
-```
-
-Update `selectors.js` to add a `citationAnchor` entry if the real selector differs from the heuristic above.
-
-- [ ] **Step 4: Re-run and confirm pass**
-
-Run:
-```bash
-npm test providers/perplexity/parse.test.js
-```
-
-Expected: all tests PASS (7 total).
-
-- [ ] **Step 5: Commit**
-
-```bash
-git add providers/perplexity/parse.js providers/perplexity/parse.test.js providers/perplexity/selectors.js
-git commit -m "feat(perplexity): preserve inline [N] citation markers in answer"
-```
+No code work required. Task 7 below remains Task 7 — numbering preserved
+to avoid churning cross-references in PROGRESS.md and TaskCreate IDs.
 
 ---
 
@@ -647,9 +577,11 @@ git commit -m "feat(perplexity): preserve inline [N] citation markers in answer"
 **Files:**
 - Modify: `providers/perplexity/parse.test.js`
 - Modify: `providers/perplexity/parse.js`
-- Modify: `providers/perplexity/selectors.js`
 
-- [ ] **Step 1: Add failing test for steps**
+(`selectors.js` already contains `stepItem`, `stepQuery`, `stepPhaseIcon` and
+exports `PHASE_BY_ICON` — populated in Task 10. Do not modify it.)
+
+- [ ] **Step 1: Add failing tests for steps**
 
 Append to `providers/perplexity/parse.test.js`:
 
@@ -662,9 +594,10 @@ describe('parse — Deep Research steps', () => {
     });
     expect(Array.isArray(result.steps)).toBe(true);
     expect(result.steps.length).toBeGreaterThanOrEqual(1);
+    const validPhases = ['identifying', 'searching', 'insights', 'other'];
     for (const step of result.steps) {
       expect(typeof step.query).toBe('string');
-      expect(typeof step.pagesVisited).toBe('number');
+      expect(validPhases).toContain(step.phase);
     }
   });
 
@@ -675,30 +608,24 @@ describe('parse — Deep Research steps', () => {
 });
 ```
 
-- [ ] **Step 2: Run — expect failure on first test**
+- [ ] **Step 2: Run — expect first new test to fail**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: new Deep Research test FAILS, non-DR test PASSES (no steps field yet).
+Expected: the `extracts steps[] from deep-research fixture` test FAILS (no steps field yet). The `non-deep-research modes return no steps field` test PASSES (no steps field = undefined = correct).
 
-- [ ] **Step 3: Add steps selectors**
+- [ ] **Step 3: Implement steps extraction in `parse.js`**
 
-Append to `providers/perplexity/selectors.js` inside the `SELECTORS` object:
-
-```js
-  stepItem: '[data-testid="dr-step"]',      // TODO(Task 10)
-  stepQuery: '.step-query',                  // TODO(Task 10)
-  stepPagesCount: '.step-pages-count',       // TODO(Task 10)
-```
-
-- [ ] **Step 4: Implement steps extraction**
-
-In `parse.js`, update the `parse` function:
+Replace the entire contents of `providers/perplexity/parse.js` with:
 
 ```js
+import * as cheerio from 'cheerio';
+import { PerplexityParseError } from './errors.js';
+import { SELECTORS, PHASE_BY_ICON } from './selectors.js';
+
 export function parse(html, { url, mode } = {}) {
   const $ = cheerio.load(html);
 
@@ -706,11 +633,6 @@ export function parse(html, { url, mode } = {}) {
   if (answerNode.length === 0) {
     throw new PerplexityParseError('answer container not found', html);
   }
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -726,33 +648,60 @@ export function parse(html, { url, mode } = {}) {
   return result;
 }
 
+function extractSources($) {
+  const items = $(SELECTORS.sourceItem);
+  if (items.length === 0) return [];
+
+  const out = [];
+  items.each((i, el) => {
+    const $el = $(el);
+    const href = $el.attr('href');
+    if (!href) return;
+    let domain = '';
+    try {
+      domain = new URL(href).hostname;
+    } catch {
+      return;
+    }
+    const title = $el.find(SELECTORS.sourceTitle).first().text().trim() || domain;
+    const snippet = $el.find(SELECTORS.sourceSnippet).first().text().trim() || undefined;
+    out.push({ index: i + 1, title, url: href, domain, snippet });
+  });
+  return out;
+}
+
 function extractSteps($) {
   const items = $(SELECTORS.stepItem);
   const out = [];
   items.each((_, el) => {
     const $el = $(el);
     const query = $el.find(SELECTORS.stepQuery).first().text().trim();
-    const pagesText = $el.find(SELECTORS.stepPagesCount).first().text().trim();
-    const pagesVisited = Number.parseInt(pagesText, 10) || 0;
-    if (query) out.push({ query, pagesVisited });
+    const iconEl = $el.find(SELECTORS.stepPhaseIcon).first();
+    const iconRef = iconEl.attr('xlink:href') || iconEl.attr('href');
+    const phase = PHASE_BY_ICON[iconRef] || 'other';
+    if (query) out.push({ query, phase });
   });
   return out;
 }
 ```
 
-- [ ] **Step 5: Run — all tests pass**
+Note: `PHASE_BY_ICON` is imported from `selectors.js` (already exported there);
+do not define a local copy in `parse.js`. The `iconEl` helper avoids calling
+`.find(...)` twice.
+
+- [ ] **Step 4: Run — all tests pass**
 
 Run:
 ```bash
 npm test providers/perplexity/parse.test.js
 ```
 
-Expected: all tests PASS.
+Expected: 7 tests PASS (2 from Task 4 + 3 from Task 5 + 2 new).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add providers/perplexity/parse.js providers/perplexity/parse.test.js providers/perplexity/selectors.js
+git add providers/perplexity/parse.js providers/perplexity/parse.test.js
 git commit -m "feat(perplexity): parse extracts Deep Research steps"
 ```
 
@@ -809,11 +758,6 @@ export function parse(html, { url, mode, raw = false } = {}) {
     throw new PerplexityParseError('answer container not found', html);
   }
   const answerHtml = raw ? $.html(answerNode) : undefined;
-  answerNode.find('a.citation, sup a').each((_, el) => {
-    const $el = $(el);
-    const n = $el.text().trim();
-    if (/^\d+$/.test(n)) $el.replaceWith(`[${n}]`);
-  });
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
@@ -955,9 +899,9 @@ xdg-open providers/perplexity/__fixtures__/auto-web.html
 | `sourceUrl` | the source's link |
 | `sourceSnippet` | the source's excerpt/snippet, if present |
 | `citationAnchor` | each inline `[N]` citation link inside the answer |
-| `stepItem` | (DR only) each step card |
-| `stepQuery` | (DR only) the search query text inside a step |
-| `stepPagesCount` | (DR only) the pages-visited number inside a step |
+| `stepItem` | (DR only) each step button |
+| `stepQuery` | (DR only) the step description text inside the button |
+| `stepPhaseIcon` | (DR only) the `<svg use>` inside the step button — read `xlink:href` |
 
 **Prefer** `[data-testid="..."]` and `[aria-label="..."]` over class names. Class names are minified and change across deploys.
 
@@ -999,7 +943,7 @@ export const SELECTORS = {
   citationAnchor: 'FILL-IN-TASK-10',
   stepItem: 'FILL-IN-TASK-10',
   stepQuery: 'FILL-IN-TASK-10',
-  stepPagesCount: 'FILL-IN-TASK-10',
+  stepPhaseIcon: 'FILL-IN-TASK-10',
 
   // --- scrape layer (interact with live page) ---
   promptInput: 'FILL-IN-TASK-10',
@@ -1075,11 +1019,11 @@ import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { PerplexityAuthError, PerplexityScrapeError } from './errors.js';
-import { SELECTORS } from './selectors.js';
+import { SELECTORS, FOCUS_URLS } from './selectors.js';
 
 const COOKIE_PATH = path.join(os.homedir(), '.claude', 'cookie-configs', 'perplexity.ai-cookies.json');
 
-export async function launchAndNavigate({ threadId } = {}) {
+export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
   if (!fs.existsSync(COOKIE_PATH)) {
     throw new PerplexityAuthError();
   }
@@ -1090,9 +1034,11 @@ export async function launchAndNavigate({ threadId } = {}) {
   await context.addCookies(cookies);
   const page = await context.newPage();
 
+  // Threading wins over focus — continuing a thread navigates to its URL directly.
+  const entryPath = FOCUS_URLS[focus] ?? '/';
   const url = threadId
     ? `https://www.perplexity.ai/search/${encodeURIComponent(threadId)}`
-    : 'https://www.perplexity.ai/';
+    : `https://www.perplexity.ai${entryPath}`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
@@ -1136,7 +1082,26 @@ git commit -m "feat(perplexity): scrape launches browser with cookies and naviga
 
 ---
 
-## Task 12: `scrape.js` — mode and focus selection
+## Task 12: `scrape.js` — `selectModel` + `selectTool` (re-scoped 2026-04-24)
+
+> **Re-scoped.** The original plan had `selectMode(page, mode)` for a 4-value
+> `auto | pro | reasoning | deep-research` enum. Live UI probes showed
+> Perplexity has restructured into three orthogonal knobs: Model menu
+> (7 LLMs), Tools menu (Deep research etc.), and Focus (URL-based).
+> The task now implements `selectModel` and `selectTool` — see the spec
+> Revisions section for the rationale and the actual commit for the code.
+> The original `selectMode` code below is preserved for historical context
+> but was never implemented.
+
+**Files (as implemented):**
+- Modify: `providers/perplexity/selectors.js` (added `modelButton`,
+  `toolsButton`, `menuRadio(label)`)
+- Modify: `providers/perplexity/scrape.js` (added `selectModel`, `selectTool`)
+- Modify: `providers/perplexity/scrape.test.js` (smoke tests for both)
+
+---
+
+### (Historical — original Task 12 as written)
 
 **Files:**
 - Modify: `providers/perplexity/scrape.js`
@@ -1164,7 +1129,7 @@ describe.skipIf(!smoke)('scrape — mode and focus selection (SMOKE=1)', () => {
 });
 ```
 
-- [ ] **Step 2: Implement `selectMode` and `selectFocus`**
+- [ ] **Step 2: Implement `selectMode` (URL-based focus lives in Task 11)**
 
 Append to `providers/perplexity/scrape.js`:
 
@@ -1241,10 +1206,10 @@ Append to `providers/perplexity/scrape.test.js`:
 import { scrapeOnce } from './scrape.js';
 
 describe.skipIf(!smoke)('scrape — full fast-mode flow (SMOKE=1)', () => {
-  it('returns HTML + URL for Auto/Web on a trivial prompt', async () => {
+  it('returns HTML + URL for Best/Web on a trivial prompt', async () => {
     const { html, url } = await scrapeOnce({
       prompt: 'who founded meta (formerly facebook)?',
-      mode: 'auto',
+      model: 'best',
       focus: 'web',
     });
     expect(typeof html).toBe('string');
@@ -1263,18 +1228,19 @@ const FAST_TIMEOUT_MS = 180_000;  // 3 min, matches spec
 const NO_PROGRESS_MS = 300_000;   // 5 min, for Deep Research
 const DEEP_TIMEOUT_MS = 1_800_000; // 30 min, matches spec
 
-export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadId }) {
-  const { browser, page } = await launchAndNavigate({ threadId });
+export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', threadId }) {
+  const { browser, page } = await launchAndNavigate({ focus, threadId });
   try {
-    await selectMode(page, mode);
-    await selectFocus(page, focus);
+    await selectModel(page, model);
+    await selectTool(page, tool);  // no-op when tool is undefined
 
     const input = page.locator(SELECTORS.promptInput).first();
-    await input.click({ timeout: 10_000 });
-    await input.type(prompt, { delay: 15 });
+    await humanClick(page, input);
+    await humanType(page, prompt);
     await page.keyboard.press(SELECTORS.submitKey);
 
-    await waitForCompletion(page, { mode });
+    const isDeep = tool === 'deep-research';
+    await waitForCompletion(page, { deep: isDeep });
 
     const html = await page.content();
     const url = page.url();
@@ -1284,15 +1250,19 @@ export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadI
   }
 }
 
-async function waitForCompletion(page, { mode }) {
-  const totalTimeout = mode === 'deep-research' ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS;
+async function waitForCompletion(page, { deep }) {
+  const totalTimeout = deep ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS;
   const start = Date.now();
   let lastProgress = Date.now();
 
   while (Date.now() - start < totalTimeout) {
-    const generating = await page.locator(SELECTORS.generatingIndicator).first().isVisible().catch(() => false);
+    // If generatingIndicator is still unset (Task 12 scrape-layer TBD),
+    // fall back to a simple settle-wait: consider the page done once we've
+    // waited at least FAST_TIMEOUT_MS / 6 without a progress signal.
+    const generating = SELECTORS.generatingIndicator
+      ? await page.locator(SELECTORS.generatingIndicator).first().isVisible().catch(() => false)
+      : false;
     if (!generating) {
-      // Optional done-indicator double-check
       if (SELECTORS.doneIndicator) {
         const done = await page.locator(SELECTORS.doneIndicator).first().isVisible().catch(() => false);
         if (done) return;
@@ -1302,7 +1272,7 @@ async function waitForCompletion(page, { mode }) {
     }
 
     // For Deep Research, watch the progress text and trip "no-progress" timeout if it stalls.
-    if (mode === 'deep-research' && SELECTORS.deepResearchProgressText) {
+    if (deep && SELECTORS.deepResearchProgressText) {
       const txt = await page.locator(SELECTORS.deepResearchProgressText).first().textContent().catch(() => null);
       if (txt) lastProgress = Date.now();
       if (Date.now() - lastProgress > NO_PROGRESS_MS) {
@@ -1313,11 +1283,11 @@ async function waitForCompletion(page, { mode }) {
     await page.waitForTimeout(1000);
   }
 
-  throw new PerplexityTimeoutError(mode === 'deep-research' ? 'deep-research-total' : 'fast-total', totalTimeout);
+  throw new PerplexityTimeoutError(deep ? 'deep-research-total' : 'fast-total', totalTimeout);
 }
 ```
 
-Also add `PerplexityTimeoutError` to the imports at the top:
+Imports at the top of `scrape.js` should be:
 
 ```js
 import { PerplexityAuthError, PerplexityScrapeError, PerplexityTimeoutError } from './errors.js';
@@ -1420,12 +1390,9 @@ Create `providers/perplexity/index.js`:
 import { scrapeOnce } from './scrape.js';
 import { parse } from './parse.js';
 
-export async function askPerplexity({ prompt, mode = 'auto', focus = 'web', threadId, raw = false }) {
-  if (focus === 'writing' && mode === 'deep-research') {
-    throw new Error('Writing focus is incompatible with Deep Research mode');
-  }
-  const { html, url } = await scrapeOnce({ prompt, mode, focus, threadId });
-  return parse(html, { url, mode, raw });
+export async function askPerplexity({ prompt, model = 'best', tool, focus = 'web', threadId, raw = false }) {
+  const { html, url } = await scrapeOnce({ prompt, model, tool, focus, threadId });
+  return parse(html, { url, mode: tool === 'deep-research' ? 'deep-research' : undefined, raw });
 }
 ```
 
@@ -1813,18 +1780,19 @@ git commit -m "feat(perplexity): add in-memory Deep Research job store"
 In `providers/perplexity/scrape.js`, update `scrapeOnce` and `waitForCompletion` signatures to accept an `onProgress` callback:
 
 ```js
-export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadId, onProgress } = {}) {
-  const { browser, page } = await launchAndNavigate({ threadId });
+export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', threadId, onProgress } = {}) {
+  const { browser, page } = await launchAndNavigate({ focus, threadId });
   try {
-    await selectMode(page, mode);
-    await selectFocus(page, focus);
+    await selectModel(page, model);
+    await selectTool(page, tool);
 
     const input = page.locator(SELECTORS.promptInput).first();
-    await input.click({ timeout: 10_000 });
-    await input.type(prompt, { delay: 15 });
+    await humanClick(page, input);
+    await humanType(page, prompt);
     await page.keyboard.press(SELECTORS.submitKey);
 
-    await waitForCompletion(page, { mode, onProgress });
+    const isDeep = tool === 'deep-research';
+    await waitForCompletion(page, { deep: isDeep, onProgress });
 
     const html = await page.content();
     const url = page.url();
@@ -1943,12 +1911,9 @@ Update `providers/perplexity/index.js`:
 import { scrapeOnce } from './scrape.js';
 import { parse } from './parse.js';
 
-export async function askPerplexity({ prompt, mode = 'auto', focus = 'web', threadId, raw = false }) {
-  if (focus === 'writing' && mode === 'deep-research') {
-    throw new Error('Writing focus is incompatible with Deep Research mode');
-  }
-  const { html, url } = await scrapeOnce({ prompt, mode, focus, threadId });
-  return parse(html, { url, mode, raw });
+export async function askPerplexity({ prompt, model = 'best', tool, focus = 'web', threadId, raw = false }) {
+  const { html, url } = await scrapeOnce({ prompt, model, tool, focus, threadId });
+  return parse(html, { url, mode: tool === 'deep-research' ? 'deep-research' : undefined, raw });
 }
 
 export function askPerplexityDeep({ prompt, focus = 'web', threadId, raw = false, store }) {

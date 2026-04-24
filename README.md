@@ -10,13 +10,15 @@ Two repos, N providers. Ghostroute is the monorepo. `fast-travel-cli` (Gemini, r
 
 ### Node scrapers (this repo root)
 
-- [`server.js`](server.js) — Express reverse-API. Exposes scrapers as HTTP endpoints Claude can call. See [`docs/server.md`](docs/server.md).
+- [`server.js`](server.js) — Express reverse-API. Exposes scrapers as HTTP endpoints Claude can call. See [`docs/server.md`](docs/server.md). Now also hosts `/ask-perplexity`, `/ask-perplexity/deep`, and `/ask-perplexity/deep/:jobId`.
 - [`grok-reverse-api-grok-main.js`](grok-reverse-api-grok-main.js) — Current `askGrok()` implementation. Playwright + stealth plugin, cookie-reuse, human-paced typing.
+- [`providers/perplexity/`](providers/perplexity/) — Structured Perplexity provider module (parse/scrape/jobs/errors split). Parse layer unit-tested against HTML fixtures; scrape layer smoke-tested live behind `SMOKE=1`.
 - `grok-reverse-api.js`, `composable-scraper.js`, `search-scraper.js` — Earlier iterations and experiments. See [`docs/architecture.md#node-file-archaeology`](docs/architecture.md#node-file-archaeology).
 
 ### Rust CLIs
 
 - [`ask-grok-cli/`](ask-grok-cli/) — Terminal-first Grok client on `chromiumoxide`. Usable standalone or orchestrated by Claude Code. See its [README](ask-grok-cli/README.md).
+- [`ask-perplexity-cli/`](ask-perplexity-cli/) — Terminal-first Perplexity client on `chromiumoxide`. Mirrors the Node provider's scraping strategy and output shape; does not depend on a running server. Includes `--deep` (Deep Research, synchronous with progress to stderr), `--model`, `--focus`, `--thread`, `--raw`. See its [README](ask-perplexity-cli/README.md).
 
 ### Chrome extension
 
@@ -38,11 +40,22 @@ Two surfaces:
 
 Both share the same cookie-reuse pattern and target `grok.com` via `grok.com-cookies.json`.
 
-### Perplexity — scaffolded, not on main
+### Perplexity — shipped
 
-Scaffolded on `feature/perplexity-node-provider`. Design splits along Perplexity's response-time characteristics: fast modes (Auto / Pro / Reasoning, ~10–60 s) follow the askGrok browser-roundtrip pattern; Deep Research (3–8 min) gets a job-shaped API with `--deep` spawning a jobID. See [`docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md`](docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md).
+Three surfaces:
 
-The scaffold lands under `providers/perplexity/` when the branch merges.
+- **HTTP sync.** `POST /ask-perplexity` with `{prompt, model?, tool?, focus?, threadId?, raw?}`. Returns `{answer, sources[], threadId, steps?, raw?}`.
+- **HTTP async (Deep Research).** `POST /ask-perplexity/deep` returns `{jobId}` in <1s; poll `GET /ask-perplexity/deep/:jobId` until `status: "done"`.
+- **Rust CLI.** `ask-perplexity-cli "prompt" [--model ...] [--focus ...] [--deep] [--thread ...] [--raw]` — same output JSON shape; `--deep` blocks synchronously with progress to stderr.
+
+Design splits along Perplexity's response-time characteristics: fast modes (~30–90s) use the askGrok browser-roundtrip pattern with adaptive text-stabilisation completion detection; Deep Research (3–8 min) gets a job-shaped API on the HTTP side. Both run headed Chromium with stealth flags (Cloudflare + Perplexity Pro gate both detect headless).
+
+Full taxonomy:
+- `model`: `best` · `sonar` · `gpt` · `gemini` · `claude` · `kimi` · `nemotron`
+- `tool`: `deep-research` (optional)
+- `focus`: `web` · `academic` · `finance` · `health` · `patents` (URL-routed entry pages)
+
+See [`docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md`](docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md) for the full spec including the Revisions log.
 
 ### Future providers
 
@@ -76,6 +89,29 @@ cargo run --release -- --prompt "Write a short haiku about Rust."
 
 See [`ask-grok-cli/README.md`](ask-grok-cli/README.md) for flags, memory conventions, and Claude Code integration.
 
+### Perplexity via HTTP
+
+```bash
+# Fast request — any model, any focus
+curl -X POST http://localhost:3005/ask-perplexity \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"who founded meta?","model":"claude","focus":"academic"}' | jq
+
+# Deep Research (async, ~3–8 min)
+JOB=$(curl -sX POST http://localhost:3005/ask-perplexity/deep \
+  -H 'Content-Type: application/json' \
+  -d '{"prompt":"state of fusion energy"}' | jq -r .jobId)
+curl -s http://localhost:3005/ask-perplexity/deep/$JOB | jq
+```
+
+### Perplexity via Rust CLI
+
+```bash
+cd ask-perplexity-cli
+./target/release/ask-perplexity-cli --model claude --focus academic "who founded meta?"
+./target/release/ask-perplexity-cli --deep "state of fusion energy"
+```
+
 ## Architecture overview
 
 Short form — the full version is in [`docs/architecture.md`](docs/architecture.md).
@@ -91,6 +127,7 @@ Short form — the full version is in [`docs/architecture.md`](docs/architecture
 - **Design records** live under `docs/superpowers/specs/` and `docs/superpowers/plans/`.
 - **Feature branches** use worktrees at `.worktrees/feature/<name>/`. Ignored via `.gitignore`.
 - **Atomic commits.** One logical change per commit; see the monorepo setup design for the initial four-commit split.
+- **Headed Chromium.** The Perplexity scraper (Node + Rust) runs headed by default — Cloudflare and Perplexity's Pro-feature gate both detect `headless`. On headless servers, run under `Xvfb`.
 
 ## License
 

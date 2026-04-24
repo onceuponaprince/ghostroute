@@ -38,7 +38,7 @@ Perplexity differs from Grok in three ways that change the design:
 | 6  | **Provider module pattern** (`providers/perplexity/`) now, provider registry later. | Isolates selectors in one file (80% of the maintenance value of a registry) without touching working Grok code. Grok stays at root until a third provider forces the refactor. |
 | 7  | **Cookies at `~/.claude/cookie-configs/perplexity.ai-cookies.json`**, shared by Node + Rust. | Follows global CLAUDE.md convention. Grok's in-repo cookie file is legacy. |
 | 8  | **Rust CLI sibling `ask-perplexity-cli/`**, native `chromiumoxide` (not shelling into Node). | Consistency with `ask-grok-cli/`. Shelling into Node would require Node at runtime and defeat the point of a Rust sibling. |
-| 9  | **Focus filters limited to Web / Academic / Writing.** | Academic is genuinely different (arXiv/PubMed-class sources). Writing is the LLM-only escape hatch. The rest (YouTube, Reddit, Wolfram) are gimmicks with high selector churn. |
+| 9  | **Focus expanded to Web / Academic / Finance / Health / Patents, implemented via URL navigation (e.g. `/academic`, `/finance`). Writing dropped.** | 2026-04-24 revision (see §Revisions): Perplexity's UI no longer exposes a per-query focus button. Topic filters are now top-level URL-routable paths. Writing (LLM-only mode) has no current URL equivalent and is removed. Net effect is broader coverage via simpler (URL-based) implementation. |
 | 10 | **Modes limited to Auto / Pro / Reasoning** (fast) + **Deep Research** (async). | These are the Pro-tier modes that materially differ from one another. |
 
 ## Architecture
@@ -118,8 +118,9 @@ client
 ```
 POST /ask-perplexity
   body:  { prompt: string,
-           mode?: 'auto' | 'pro' | 'reasoning',           // default: 'auto'
-           focus?: 'web' | 'academic' | 'writing',        // default: 'web'
+           model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron',  // default: 'best'
+           tool?: 'deep-research',                       // optional; if set, server routes to /deep
+           focus?: 'web' | 'academic' | 'finance' | 'health' | 'patents',  // default: 'web' (→ entry URL)
            threadId?: string,                             // continue existing thread
            raw?: boolean }                                // include raw HTML — default: false
   → 200: { answer, sources[], threadId, raw? }
@@ -129,7 +130,8 @@ POST /ask-perplexity
 
 POST /ask-perplexity/deep
   body:  { prompt: string,
-           focus?: 'web' | 'academic',                    // 'writing' makes no sense for DR
+           model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron',
+           focus?: 'web' | 'academic' | 'finance' | 'health' | 'patents',
            threadId?: string }
   → 202: { jobId: string }
 
@@ -159,12 +161,12 @@ Output: the same JSON shape as the HTTP response, pretty-printed to stdout. Prog
 
 ```js
 {
-  answer: string,                    // inline [1][2] markers preserved
+  answer: string,                    // pure prose (Perplexity UI no longer renders inline citation markers — see §Revisions)
   sources: [
     { index: 1, title: string, url: string, domain: string, snippet?: string }
   ],
   steps?: [                          // Deep Research only
-    { query: string, pagesVisited: number }
+    { query: string, phase: 'identifying' | 'searching' | 'insights' | 'other' }
   ],
   threadId: string,                  // from URL after submission
   raw?: {                            // only when raw: true in request
@@ -174,8 +176,12 @@ Output: the same JSON shape as the HTTP response, pretty-printed to stdout. Prog
 }
 ```
 
-When `focus: 'writing'`, `sources` is `[]` and extraction of the sources panel is
-skipped (Writing mode is LLM-only, no browsing, no sources to extract).
+Focus is implemented by navigating to the corresponding entry URL before
+submitting the prompt: `web` → `/`, `academic` → `/academic`, `finance` →
+`/finance`, `health` → `/health`, `patents` → `/patents`. Mode selection
+(Auto/Pro/Reasoning/Deep Research) is orthogonal and happens after entry
+navigation. Continuing an existing thread (via `threadId`) navigates to
+`/search/<threadId>` directly, ignoring focus.
 
 ## Threading
 
@@ -268,16 +274,12 @@ Designed so the repo is never in a broken intermediate state:
   Pro-tier rate limits are the ceiling that matters.
 - **Refactoring Grok code** into the new provider pattern. Grok stays as-is.
 - **CI integration tests.** E2E test runs locally only; no cookies in CI.
-- **Writing mode in Deep Research.** Writing mode disables browsing; Deep
-  Research requires browsing. Combination rejected at the API layer.
-
 ## Verification checklist
 
 After implementation, the following should be true:
 
 - [ ] `POST /ask-perplexity { prompt: "what is 2+2" }` returns a valid
       structured payload within 90s.
-- [ ] The returned `answer` preserves inline `[1]` citation markers.
 - [ ] `sources[]` contains ≥1 entry with `{ index, title, url, domain }`.
 - [ ] Passing `threadId` from a prior response continues that thread (verify
       the model references prior turns).
@@ -285,9 +287,13 @@ After implementation, the following should be true:
 - [ ] `GET /ask-perplexity/deep/:jobId` transitions `queued → running → done`
       over a single Deep Research run.
 - [ ] Completed job returns `result.steps[]` with ≥1 entry.
-- [ ] `mode: 'reasoning'` and `focus: 'academic'` each produce distinguishable
-      outputs vs. defaults (reasoning shows chain-of-thought; academic links to
-      arXiv/PubMed-class domains).
+- [ ] `model: 'claude'` and `focus: 'academic'` each produce distinguishable
+      outputs vs. defaults (Claude's voice differs from Best's routed model;
+      academic links to arXiv/PubMed-class domains via `/academic` entry URL).
+- [ ] `tool: 'deep-research'` triggers the async `/deep` flow and returns
+      `result.steps[]` with ≥1 entry on completion.
+- [ ] `focus: 'finance'` resolves by navigating to `/finance` and produces
+      finance-biased sources for a relevant query.
 - [ ] `raw: true` in request yields populated `raw.answerHtml` and
       `raw.sourcesHtml`.
 - [ ] Missing/expired cookies yield HTTP 401 with the "refresh cookies"
@@ -296,3 +302,115 @@ After implementation, the following should be true:
       JSON output for a trivial prompt.
 - [ ] `parse.js` vitest suite passes against every fixture in `__fixtures__/`.
 - [ ] `providers/perplexity/__fixtures__/` is committed; cookie files are not.
+
+---
+
+## Revisions
+
+### 2026-04-24 — inline citation markers dropped
+
+Offline dissection of captured fixtures (auto-web, reasoning-web,
+deep-research-web) via `scripts/dissect-fixtures.mjs` found **zero**
+inline citation markers in the answer prose: no `[N]` text patterns,
+no `<a>` tags, no `<sup>` tags. Perplexity's current UI renders the
+answer as pure prose, with sources listed separately in the overlay
+panel (no numbered annotations in situ).
+
+**Change:** `answer` return-shape field is pure prose. Plan Task 6
+("parse.js — inline citation markers preserved") deleted. Verification
+checklist item removed.
+
+Sources still extracted fully and indexed 1..N in `sources[]` as before.
+Callers that need citation-style rendering can cross-reference sources
+by position or by content-matching titles against the answer text.
+
+### 2026-04-24 — `steps[].pagesVisited` replaced with `steps[].phase`
+
+DR step dissection found no visible pages-visited count in the UI.
+Each step is an icon + text pair; pages visited is not exposed. Instead
+the icon identifies the step's phase:
+
+- `#pplx-icon-blocks` → `identifying`
+- `#pplx-icon-world-search` → `searching`
+- `#pplx-icon-bolt` → `insights`
+- anything else → `other`
+
+Return shape field renamed: `steps[].pagesVisited` → `steps[].phase`.
+`stepPagesCount` selector replaced by `stepPhaseIcon` (read the
+`xlink:href` of the `<svg use>` inside the step button).
+
+### 2026-04-24 — focus filter re-scoped as URL navigation
+
+Live sidebar probe (`scripts/sidebar-probe.mjs`) found Perplexity no
+longer exposes a per-query focus button. Topic filtering is implemented
+as top-level URL-routable paths: `/academic`, `/finance`, `/health`,
+`/patents`, `/discover`, and the root `/`. Each is a pre-filtered search
+entry page.
+
+**Changes:**
+
+1. `focus` enum becomes `web | academic | finance | health | patents`.
+   `writing` is dropped — Perplexity no longer exposes an LLM-only
+   mode via any URL. `finance`, `health`, and `patents` are new (were
+   previously deemed gimmicks — the URL-based implementation makes them
+   cheap to support).
+2. Focus selection moves from `selectFocus()` DOM click to entry-URL
+   navigation. No focus button selector is needed. `FOCUS_URLS = { web:
+   '/', academic: '/academic', finance: '/finance', health: '/health',
+   patents: '/patents' }`.
+3. Task 12 `selectFocus()` can be deleted; focus is applied via
+   `page.goto('https://www.perplexity.ai' + FOCUS_URLS[focus])` in
+   `launchAndNavigate`.
+4. `writing-focus.html` fixture removed from Task 2 requirements (no
+   longer captures meaningful state since Writing mode is gone).
+5. "Writing mode in Deep Research" out-of-scope item removed (the
+   combination is now impossible by construction).
+
+Simpler implementation, broader coverage.
+
+### 2026-04-24 — `mode` replaced with `model` + `tool` (Perplexity taxonomy shift)
+
+Live UI probes (with stealth flags applied) found Perplexity has
+restructured the old Auto/Pro/Reasoning/Deep-Research mode enum into two
+orthogonal knobs:
+
+- **Model menu** (`button[aria-label="Model"]`) — 7 LLMs: Best, Sonar,
+  GPT-5.4, Gemini 3.1 Pro, Claude Sonnet 4.6, Kimi K2.6, Nemotron 3 Super.
+  `Best` auto-selects (replaces old `auto`).
+- **Tools menu** (`button[aria-label="Add files or tools"]`, the `+`
+  button) — contains `Deep research` as a `menuitemradio` alongside
+  file-upload actions. This is where Deep Research now lives.
+- **Reasoning** — dropped from the UI entirely. Folded into per-model
+  capabilities (Claude / GPT-5 / Gemini 3 all reason internally).
+
+**API changes:**
+
+- `mode` field removed.
+- `model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron'`
+  (default: `'best'`).
+- `tool?: 'deep-research'` (optional; omitted means no tool active).
+- `POST /ask-perplexity/deep` is the right endpoint when `tool:
+  'deep-research'` is requested — server may auto-route synchronous
+  `/ask-perplexity` calls to the async flow when this tool is set.
+
+**Automation-gate findings also documented here:**
+
+- `headless: true` trips Cloudflare; `headless: false` passes.
+- Stock Playwright advertises automation via `--enable-automation` and
+  sets `navigator.webdriver=true`. Perplexity detects both and serves a
+  stub Model menu (only `Sonar` visible). Bypassed by:
+  `args: ['--disable-blink-features=AutomationControlled']`,
+  `ignoreDefaultArgs: ['--enable-automation']`, and an `addInitScript`
+  that overrides `navigator.webdriver`.
+- `providers/perplexity/human.js` adds human-behaviour helpers (typing
+  jitter with occasional typo→backspace, mouse-move trails, per-click
+  delays) as defence-in-depth.
+
+**Implementation impact:**
+
+- `selectors.js`: `modelButton`, `toolsButton`, `menuRadio(label)`
+  (radio selector works for both menus).
+- `scrape.js`: `selectModel(page, model)` and `selectTool(page, tool)`
+  replace the deleted `selectMode`.
+- `index.js` / `server.js`: `{ model, tool, focus, ... }` replaces
+  `{ mode, focus, ... }` in request bodies.
