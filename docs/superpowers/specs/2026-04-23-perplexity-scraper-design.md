@@ -118,7 +118,8 @@ client
 ```
 POST /ask-perplexity
   body:  { prompt: string,
-           mode?: 'auto' | 'pro' | 'reasoning',           // default: 'auto'
+           model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron',  // default: 'best'
+           tool?: 'deep-research',                       // optional; if set, server routes to /deep
            focus?: 'web' | 'academic' | 'finance' | 'health' | 'patents',  // default: 'web' (→ entry URL)
            threadId?: string,                             // continue existing thread
            raw?: boolean }                                // include raw HTML — default: false
@@ -129,7 +130,8 @@ POST /ask-perplexity
 
 POST /ask-perplexity/deep
   body:  { prompt: string,
-           focus?: 'web' | 'academic' | 'finance' | 'health' | 'patents',  // → entry URL
+           model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron',
+           focus?: 'web' | 'academic' | 'finance' | 'health' | 'patents',
            threadId?: string }
   → 202: { jobId: string }
 
@@ -285,9 +287,11 @@ After implementation, the following should be true:
 - [ ] `GET /ask-perplexity/deep/:jobId` transitions `queued → running → done`
       over a single Deep Research run.
 - [ ] Completed job returns `result.steps[]` with ≥1 entry.
-- [ ] `mode: 'reasoning'` and `focus: 'academic'` each produce distinguishable
-      outputs vs. defaults (reasoning shows chain-of-thought; academic links to
-      arXiv/PubMed-class domains via `/academic` entry URL).
+- [ ] `model: 'claude'` and `focus: 'academic'` each produce distinguishable
+      outputs vs. defaults (Claude's voice differs from Best's routed model;
+      academic links to arXiv/PubMed-class domains via `/academic` entry URL).
+- [ ] `tool: 'deep-research'` triggers the async `/deep` flow and returns
+      `result.steps[]` with ≥1 entry on completion.
 - [ ] `focus: 'finance'` resolves by navigating to `/finance` and produces
       finance-biased sources for a relevant query.
 - [ ] `raw: true` in request yields populated `raw.answerHtml` and
@@ -363,3 +367,50 @@ entry page.
    combination is now impossible by construction).
 
 Simpler implementation, broader coverage.
+
+### 2026-04-24 — `mode` replaced with `model` + `tool` (Perplexity taxonomy shift)
+
+Live UI probes (with stealth flags applied) found Perplexity has
+restructured the old Auto/Pro/Reasoning/Deep-Research mode enum into two
+orthogonal knobs:
+
+- **Model menu** (`button[aria-label="Model"]`) — 7 LLMs: Best, Sonar,
+  GPT-5.4, Gemini 3.1 Pro, Claude Sonnet 4.6, Kimi K2.6, Nemotron 3 Super.
+  `Best` auto-selects (replaces old `auto`).
+- **Tools menu** (`button[aria-label="Add files or tools"]`, the `+`
+  button) — contains `Deep research` as a `menuitemradio` alongside
+  file-upload actions. This is where Deep Research now lives.
+- **Reasoning** — dropped from the UI entirely. Folded into per-model
+  capabilities (Claude / GPT-5 / Gemini 3 all reason internally).
+
+**API changes:**
+
+- `mode` field removed.
+- `model?: 'best' | 'sonar' | 'gpt' | 'gemini' | 'claude' | 'kimi' | 'nemotron'`
+  (default: `'best'`).
+- `tool?: 'deep-research'` (optional; omitted means no tool active).
+- `POST /ask-perplexity/deep` is the right endpoint when `tool:
+  'deep-research'` is requested — server may auto-route synchronous
+  `/ask-perplexity` calls to the async flow when this tool is set.
+
+**Automation-gate findings also documented here:**
+
+- `headless: true` trips Cloudflare; `headless: false` passes.
+- Stock Playwright advertises automation via `--enable-automation` and
+  sets `navigator.webdriver=true`. Perplexity detects both and serves a
+  stub Model menu (only `Sonar` visible). Bypassed by:
+  `args: ['--disable-blink-features=AutomationControlled']`,
+  `ignoreDefaultArgs: ['--enable-automation']`, and an `addInitScript`
+  that overrides `navigator.webdriver`.
+- `providers/perplexity/human.js` adds human-behaviour helpers (typing
+  jitter with occasional typo→backspace, mouse-move trails, per-click
+  delays) as defence-in-depth.
+
+**Implementation impact:**
+
+- `selectors.js`: `modelButton`, `toolsButton`, `menuRadio(label)`
+  (radio selector works for both menus).
+- `scrape.js`: `selectModel(page, model)` and `selectTool(page, tool)`
+  replace the deleted `selectMode`.
+- `index.js` / `server.js`: `{ model, tool, focus, ... }` replaces
+  `{ mode, focus, ... }` in request bodies.

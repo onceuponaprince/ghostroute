@@ -1082,7 +1082,26 @@ git commit -m "feat(perplexity): scrape launches browser with cookies and naviga
 
 ---
 
-## Task 12: `scrape.js` — mode selection (focus is URL-based in Task 11)
+## Task 12: `scrape.js` — `selectModel` + `selectTool` (re-scoped 2026-04-24)
+
+> **Re-scoped.** The original plan had `selectMode(page, mode)` for a 4-value
+> `auto | pro | reasoning | deep-research` enum. Live UI probes showed
+> Perplexity has restructured into three orthogonal knobs: Model menu
+> (7 LLMs), Tools menu (Deep research etc.), and Focus (URL-based).
+> The task now implements `selectModel` and `selectTool` — see the spec
+> Revisions section for the rationale and the actual commit for the code.
+> The original `selectMode` code below is preserved for historical context
+> but was never implemented.
+
+**Files (as implemented):**
+- Modify: `providers/perplexity/selectors.js` (added `modelButton`,
+  `toolsButton`, `menuRadio(label)`)
+- Modify: `providers/perplexity/scrape.js` (added `selectModel`, `selectTool`)
+- Modify: `providers/perplexity/scrape.test.js` (smoke tests for both)
+
+---
+
+### (Historical — original Task 12 as written)
 
 **Files:**
 - Modify: `providers/perplexity/scrape.js`
@@ -1187,10 +1206,10 @@ Append to `providers/perplexity/scrape.test.js`:
 import { scrapeOnce } from './scrape.js';
 
 describe.skipIf(!smoke)('scrape — full fast-mode flow (SMOKE=1)', () => {
-  it('returns HTML + URL for Auto/Web on a trivial prompt', async () => {
+  it('returns HTML + URL for Best/Web on a trivial prompt', async () => {
     const { html, url } = await scrapeOnce({
       prompt: 'who founded meta (formerly facebook)?',
-      mode: 'auto',
+      model: 'best',
       focus: 'web',
     });
     expect(typeof html).toBe('string');
@@ -1209,18 +1228,19 @@ const FAST_TIMEOUT_MS = 180_000;  // 3 min, matches spec
 const NO_PROGRESS_MS = 300_000;   // 5 min, for Deep Research
 const DEEP_TIMEOUT_MS = 1_800_000; // 30 min, matches spec
 
-export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadId }) {
-  const { browser, page } = await launchAndNavigate({ threadId });
+export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', threadId }) {
+  const { browser, page } = await launchAndNavigate({ focus, threadId });
   try {
-    await selectMode(page, mode);
-    await selectFocus(page, focus);
+    await selectModel(page, model);
+    await selectTool(page, tool);  // no-op when tool is undefined
 
     const input = page.locator(SELECTORS.promptInput).first();
-    await input.click({ timeout: 10_000 });
-    await input.type(prompt, { delay: 15 });
+    await humanClick(page, input);
+    await humanType(page, prompt);
     await page.keyboard.press(SELECTORS.submitKey);
 
-    await waitForCompletion(page, { mode });
+    const isDeep = tool === 'deep-research';
+    await waitForCompletion(page, { deep: isDeep });
 
     const html = await page.content();
     const url = page.url();
@@ -1230,15 +1250,19 @@ export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadI
   }
 }
 
-async function waitForCompletion(page, { mode }) {
-  const totalTimeout = mode === 'deep-research' ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS;
+async function waitForCompletion(page, { deep }) {
+  const totalTimeout = deep ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS;
   const start = Date.now();
   let lastProgress = Date.now();
 
   while (Date.now() - start < totalTimeout) {
-    const generating = await page.locator(SELECTORS.generatingIndicator).first().isVisible().catch(() => false);
+    // If generatingIndicator is still unset (Task 12 scrape-layer TBD),
+    // fall back to a simple settle-wait: consider the page done once we've
+    // waited at least FAST_TIMEOUT_MS / 6 without a progress signal.
+    const generating = SELECTORS.generatingIndicator
+      ? await page.locator(SELECTORS.generatingIndicator).first().isVisible().catch(() => false)
+      : false;
     if (!generating) {
-      // Optional done-indicator double-check
       if (SELECTORS.doneIndicator) {
         const done = await page.locator(SELECTORS.doneIndicator).first().isVisible().catch(() => false);
         if (done) return;
@@ -1248,7 +1272,7 @@ async function waitForCompletion(page, { mode }) {
     }
 
     // For Deep Research, watch the progress text and trip "no-progress" timeout if it stalls.
-    if (mode === 'deep-research' && SELECTORS.deepResearchProgressText) {
+    if (deep && SELECTORS.deepResearchProgressText) {
       const txt = await page.locator(SELECTORS.deepResearchProgressText).first().textContent().catch(() => null);
       if (txt) lastProgress = Date.now();
       if (Date.now() - lastProgress > NO_PROGRESS_MS) {
@@ -1259,11 +1283,11 @@ async function waitForCompletion(page, { mode }) {
     await page.waitForTimeout(1000);
   }
 
-  throw new PerplexityTimeoutError(mode === 'deep-research' ? 'deep-research-total' : 'fast-total', totalTimeout);
+  throw new PerplexityTimeoutError(deep ? 'deep-research-total' : 'fast-total', totalTimeout);
 }
 ```
 
-Also add `PerplexityTimeoutError` to the imports at the top:
+Imports at the top of `scrape.js` should be:
 
 ```js
 import { PerplexityAuthError, PerplexityScrapeError, PerplexityTimeoutError } from './errors.js';
@@ -1366,12 +1390,9 @@ Create `providers/perplexity/index.js`:
 import { scrapeOnce } from './scrape.js';
 import { parse } from './parse.js';
 
-export async function askPerplexity({ prompt, mode = 'auto', focus = 'web', threadId, raw = false }) {
-  if (focus === 'writing' && mode === 'deep-research') {
-    throw new Error('Writing focus is incompatible with Deep Research mode');
-  }
-  const { html, url } = await scrapeOnce({ prompt, mode, focus, threadId });
-  return parse(html, { url, mode, raw });
+export async function askPerplexity({ prompt, model = 'best', tool, focus = 'web', threadId, raw = false }) {
+  const { html, url } = await scrapeOnce({ prompt, model, tool, focus, threadId });
+  return parse(html, { url, mode: tool === 'deep-research' ? 'deep-research' : undefined, raw });
 }
 ```
 
@@ -1759,18 +1780,19 @@ git commit -m "feat(perplexity): add in-memory Deep Research job store"
 In `providers/perplexity/scrape.js`, update `scrapeOnce` and `waitForCompletion` signatures to accept an `onProgress` callback:
 
 ```js
-export async function scrapeOnce({ prompt, mode = 'auto', focus = 'web', threadId, onProgress } = {}) {
-  const { browser, page } = await launchAndNavigate({ threadId });
+export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', threadId, onProgress } = {}) {
+  const { browser, page } = await launchAndNavigate({ focus, threadId });
   try {
-    await selectMode(page, mode);
-    await selectFocus(page, focus);
+    await selectModel(page, model);
+    await selectTool(page, tool);
 
     const input = page.locator(SELECTORS.promptInput).first();
-    await input.click({ timeout: 10_000 });
-    await input.type(prompt, { delay: 15 });
+    await humanClick(page, input);
+    await humanType(page, prompt);
     await page.keyboard.press(SELECTORS.submitKey);
 
-    await waitForCompletion(page, { mode, onProgress });
+    const isDeep = tool === 'deep-research';
+    await waitForCompletion(page, { deep: isDeep, onProgress });
 
     const html = await page.content();
     const url = page.url();
@@ -1889,12 +1911,9 @@ Update `providers/perplexity/index.js`:
 import { scrapeOnce } from './scrape.js';
 import { parse } from './parse.js';
 
-export async function askPerplexity({ prompt, mode = 'auto', focus = 'web', threadId, raw = false }) {
-  if (focus === 'writing' && mode === 'deep-research') {
-    throw new Error('Writing focus is incompatible with Deep Research mode');
-  }
-  const { html, url } = await scrapeOnce({ prompt, mode, focus, threadId });
-  return parse(html, { url, mode, raw });
+export async function askPerplexity({ prompt, model = 'best', tool, focus = 'web', threadId, raw = false }) {
+  const { html, url } = await scrapeOnce({ prompt, model, tool, focus, threadId });
+  return parse(html, { url, mode: tool === 'deep-research' ? 'deep-research' : undefined, raw });
 }
 
 export function askPerplexityDeep({ prompt, focus = 'web', threadId, raw = false, store }) {
