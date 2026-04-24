@@ -26,8 +26,14 @@ document.getElementById('export').addEventListener('click', async () => {
 
     const url = new URL(tab.url);
 
-    // 2. Fetch all cookies for this specific domain.
-    chrome.cookies.getAll({ domain: url.hostname }, (cookies) => {
+    // 2. Fetch every cookie that would be sent with a request to this URL.
+    //    Using { url } instead of { domain } is load-bearing: the domain filter
+    //    only matches the exact hostname and its subdomains, which skips
+    //    parent-domain cookies (e.g. .google.com when the tab is on
+    //    gemini.google.com). Parent-domain cookies carry consent state
+    //    (CONSENT, SOCS) and Google session cookies (SID, SSID, __Secure-*),
+    //    which are what authenticated scrapers actually need.
+    chrome.cookies.getAll({ url: tab.url }, (cookies) => {
       // 3. Convert Chrome cookie shape to Playwright cookie shape.
       const playwrightCookies = cookies.map((c) => ({
         name: c.name,

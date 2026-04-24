@@ -25,9 +25,15 @@ format consumed by ghostroute's providers and their Rust CLI siblings.
    mv ~/Downloads/gemini.google.com-cookies.json ~/.claude/cookie-configs/
    ```
 
-The extension's logic is hostname-agnostic — `popup.js` reads whatever domain
-the active tab is on and exports its cookies. No manifest edits or code changes
-are needed to support a new site.
+The extension's logic is hostname-agnostic — `popup.js` reads whatever URL the
+active tab is on and exports every cookie that would be sent with a request to
+it. That deliberately includes parent-domain cookies: exporting from
+`gemini.google.com` picks up `.google.com` consent and session cookies
+(`CONSENT`, `SOCS`, `SID`, `SSID`, `__Secure-*`) which hostname-only exports
+miss. No manifest edits or code changes are needed to support a new site.
+
+The export filename is still `<hostname>-cookies.json` — named for the tab you
+exported from, not the domain of every cookie inside.
 
 ## Output format
 
