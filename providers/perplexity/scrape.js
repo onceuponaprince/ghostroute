@@ -13,7 +13,13 @@ export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
   }
   const cookies = JSON.parse(fs.readFileSync(COOKIE_PATH, 'utf8'));
 
-  const browser = await chromium.launch({ headless: true });
+  // headless: false is load-bearing. Cloudflare detects the headless flag
+  // directly and serves a verify-human interstitial that returns ~31 KB of
+  // challenge HTML instead of the ~360 KB app payload. Tested with stock
+  // Playwright headed, patchright (stealth-patched) headless+Chrome-channel,
+  // and persistent context headless — only headed passes the gate.
+  // For headless servers, run under Xvfb.
+  const browser = await chromium.launch({ headless: false });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies(cookies);
   const page = await context.newPage();
@@ -25,6 +31,13 @@ export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
     : `https://www.perplexity.ai${entryPath}`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
+
+  // If we hit a Cloudflare challenge the URL carries a __cf_chl_rt_tk token.
+  // Wait briefly for the challenge to resolve; if it hasn't after 6s, the
+  // gate probably kicked us to a login wall or blocked outright.
+  if (page.url().includes('__cf_chl_rt_tk')) {
+    await page.waitForURL((u) => !u.toString().includes('__cf_chl_rt_tk'), { timeout: 15_000 }).catch(() => {});
+  }
 
   // Fail fast if we landed on a login wall.
   if (SELECTORS.loginWallDetector) {

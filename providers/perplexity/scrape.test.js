@@ -7,11 +7,22 @@ describe.skipIf(!smoke)('scrape — live browser (SMOKE=1)', () => {
   it('launches chromium, loads cookies, navigates to perplexity.ai without login wall', async () => {
     const { page, browser } = await launchAndNavigate();
     try {
-      const url = page.url();
-      expect(url).toMatch(/perplexity\.ai/);
-      const content = await page.content();
-      // Rough sanity: we landed somewhere with a prompt input visible.
-      expect(content.toLowerCase()).toMatch(/perplexity/);
+      // Confirm we got past Cloudflare (not stuck on __cf_chl_rt_tk)
+      expect(page.url()).not.toContain('__cf_chl_rt_tk');
+      expect(page.url()).toMatch(/perplexity\.ai/);
+      // Confirm the real app loaded — the Lexical prompt input is distinctive
+      // and not present on the Cloudflare challenge page.
+      const hasPromptInput = await page.locator('div[contenteditable="true"][role="textbox"]').count();
+      expect(hasPromptInput).toBeGreaterThan(0);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it('focus: academic routes to /academic entry URL', async () => {
+    const { page, browser } = await launchAndNavigate({ focus: 'academic' });
+    try {
+      expect(page.url()).toMatch(/perplexity\.ai\/academic/);
     } finally {
       await browser.close();
     }
