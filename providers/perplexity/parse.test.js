@@ -67,3 +67,20 @@ describe('parse — Deep Research steps', () => {
     expect(result.steps).toBeUndefined();
   });
 });
+
+describe('parse — raw HTML escape hatch', () => {
+  it('omits raw field by default', () => {
+    const result = parse(fixture('auto-web.html'), { url: 'https://perplexity.ai/search/abc' });
+    expect(result.raw).toBeUndefined();
+  });
+
+  it('includes raw.answerHtml and raw.sourcesHtml when raw: true', () => {
+    const result = parse(fixture('auto-web.html'), {
+      url: 'https://perplexity.ai/search/abc',
+      raw: true,
+    });
+    expect(typeof result.raw.answerHtml).toBe('string');
+    expect(result.raw.answerHtml.length).toBeGreaterThan(0);
+    expect(typeof result.raw.sourcesHtml).toBe('string');
+  });
+});

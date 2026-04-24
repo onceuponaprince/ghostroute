@@ -2,17 +2,21 @@ import * as cheerio from 'cheerio';
 import { PerplexityParseError } from './errors.js';
 import { SELECTORS, PHASE_BY_ICON } from './selectors.js';
 
-export function parse(html, { url, mode } = {}) {
+export function parse(html, { url, mode, raw = false } = {}) {
   const $ = cheerio.load(html);
 
   const answerNode = $(SELECTORS.answerContainer).last();
   if (answerNode.length === 0) {
     throw new PerplexityParseError('answer container not found', html);
   }
+  const answerHtml = raw ? $.html(answerNode) : undefined;
   const answer = answerNode.text().trim();
   if (!answer) {
     throw new PerplexityParseError('answer container empty', html);
   }
+
+  const sourcesNode = $(SELECTORS.sourcesContainer).first();
+  const sourcesHtml = raw ? (sourcesNode.length ? $.html(sourcesNode) : '') : undefined;
 
   const sources = extractSources($);
   const result = { answer, sources, threadId: null };
@@ -20,7 +24,9 @@ export function parse(html, { url, mode } = {}) {
   if (mode === 'deep-research') {
     result.steps = extractSteps($);
   }
-
+  if (raw) {
+    result.raw = { answerHtml, sourcesHtml };
+  }
   return result;
 }
 
