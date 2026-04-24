@@ -22,6 +22,10 @@ struct Args {
     /// Gemini conversation URL (e.g. https://gemini.google.com/app/<id>)
     #[arg(long)]
     conversation_url: String,
+
+    /// Launch Chromium with a visible window. Debug affordance — first-run is headless-only.
+    #[arg(long, default_value_t = false)]
+    visible: bool,
 }
 
 #[derive(Deserialize, Debug)]
@@ -60,9 +64,12 @@ fn load_cookies() -> Result<String> {
     Ok(data)
 }
 
-async fn launch_browser() -> Result<(Browser, tokio::task::JoinHandle<()>)> {
-    let config = BrowserConfig::builder()
-        .arg("--no-sandbox")
+async fn launch_browser(visible: bool) -> Result<(Browser, tokio::task::JoinHandle<()>)> {
+    let mut builder = BrowserConfig::builder().arg("--no-sandbox");
+    if visible {
+        builder = builder.with_head();
+    }
+    let config = builder
         .build()
         .map_err(|e| format!("Failed to build BrowserConfig: {}", e))?;
     let (browser, mut handler) = Browser::launch(config).await?;
@@ -70,6 +77,56 @@ async fn launch_browser() -> Result<(Browser, tokio::task::JoinHandle<()>)> {
         while handler.next().await.is_some() {}
     });
     Ok((browser, handle))
+}
+
+async fn dump_diagnostics(page: &Page) -> Result<()> {
+    let url = page.url().await.ok().flatten().unwrap_or_default();
+    let title = page.get_title().await.ok().flatten().unwrap_or_default();
+
+    let counts: serde_json::Value = page
+        .evaluate(
+            r#"
+            (() => {
+                const custom = {};
+                document.querySelectorAll('*').forEach(e => {
+                    const t = (e.tagName || '').toLowerCase();
+                    if (t.includes('-')) custom[t] = (custom[t] || 0) + 1;
+                });
+                return {
+                    user_query: document.querySelectorAll('user-query').length,
+                    model_response: document.querySelectorAll('model-response').length,
+                    user_query_content: document.querySelectorAll('.user-query-content').length,
+                    model_response_text: document.querySelectorAll('.model-response-text').length,
+                    sign_in_link: document.body ? document.body.innerText.includes('Sign in') : false,
+                    top_custom_elements: Object.entries(custom)
+                        .sort((a, b) => b[1] - a[1])
+                        .slice(0, 15),
+                };
+            })();
+            "#,
+        )
+        .await?
+        .into_value()?;
+
+    let body_sample: String = page
+        .evaluate(
+            r#"(() => (document.body ? document.body.innerText : '').slice(0, 800))();"#,
+        )
+        .await?
+        .into_value()?;
+
+    eprintln!("{} diagnostics:", "[fast-travel]".yellow());
+    eprintln!("  url: {}", url);
+    eprintln!("  title: {}", title);
+    eprintln!(
+        "  selector counts: {}",
+        serde_json::to_string_pretty(&counts).unwrap_or_else(|_| "<unserialisable>".to_string())
+    );
+    eprintln!("  body text (first 800 chars):");
+    for line in body_sample.lines().take(30) {
+        eprintln!("    {}", line);
+    }
+    Ok(())
 }
 
 async fn inject_cookies_and_navigate(
@@ -125,6 +182,7 @@ async fn wait_for_conversation(page: &Page) -> Result<()> {
         }
         sleep(Duration::from_millis(500)).await;
     }
+    let _ = dump_diagnostics(page).await;
     Err("Timed out waiting for Gemini conversation DOM. Selectors may have drifted, or auth didn't complete.".into())
 }
 
@@ -202,7 +260,7 @@ async fn main() -> Result<()> {
     );
 
     let cookie_data = load_cookies()?;
-    let (mut browser, _handler) = launch_browser().await?;
+    let (mut browser, _handler) = launch_browser(args.visible).await?;
 
     let run: Result<Vec<Message>> = async {
         let page =
@@ -211,6 +269,14 @@ async fn main() -> Result<()> {
         extract_conversation(&page).await
     }
     .await;
+
+    if args.visible {
+        eprintln!(
+            "{} --visible: holding browser open 8s for manual inspection.",
+            "[fast-travel]".yellow()
+        );
+        sleep(Duration::from_secs(8)).await;
+    }
 
     if let Err(e) = browser.close().await {
         eprintln!(
