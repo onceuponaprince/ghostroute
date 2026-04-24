@@ -13,6 +13,11 @@ perplexity.ai.
   layer smoke-tested live behind `SMOKE=1`).
 - **`ask-grok-cli/` — Rust CLI** · Terminal-first Grok client built on
   `chromiumoxide`. Usable standalone or orchestrated by Claude Code.
+- **`ask-perplexity-cli/` — Rust CLI** · Terminal-first Perplexity client
+  built on `chromiumoxide`. Mirrors the Node provider's scraping strategy
+  and output shape; does not depend on a running server. Includes
+  `--deep` (Deep Research, synchronous with progress to stderr), `--model`,
+  `--focus`, `--thread`, `--raw`.
 - **`cookie-master-key/` — Chrome extension** · Exports session cookies
   from x.com / grok.com / perplexity.ai in the format the scrapers expect.
 
