@@ -90,8 +90,14 @@ export async function selectModel(page, model = 'best') {
   if (!label) {
     throw new PerplexityScrapeError('select-model', 'unknown model', `model=${model}`);
   }
+  // Topic routes (/academic, /finance, etc.) don't expose the Model button —
+  // only `/` does. Skip silently when the button isn't visible.
+  const btn = page.locator(SELECTORS.modelButton).first();
+  const visible = await btn.isVisible({ timeout: 2_000 }).catch(() => false);
+  if (!visible) return;
+
   try {
-    await humanClick(page, page.locator(SELECTORS.modelButton));
+    await humanClick(page, btn);
     await humanPause(page, 400, 900);
     await humanClick(page, page.locator(SELECTORS.menuRadio(label)));
     await humanPause(page, 200, 500);
@@ -124,17 +130,18 @@ const NO_PROGRESS_MS = 300_000;     // 5 min, tripped if DR stops emitting progr
 // text length. When it stops growing for `stableMs` ms, we call it done.
 // Robust against UI changes because it doesn't rely on specific spinner
 // class names (those drift constantly).
-async function waitForAnswerStable(page, { totalTimeoutMs, stableMs, onProgress }) {
+async function waitForAnswerStable(page, { totalTimeoutMs, stableMs, onProgress, firstRenderTimeoutMs = 60_000 }) {
   const start = Date.now();
   let lastLen = 0;
   let lastChange = Date.now();
   let lastPhaseCount = 0;
 
-  // First: wait for the answer container to even appear.
+  // First: wait for the answer container to even appear. DR needs longer —
+  // the steps-disclosure block renders before the first markdown-content div.
   try {
-    await page.waitForSelector(SELECTORS.answerContainer, { timeout: 60_000 });
+    await page.waitForSelector(SELECTORS.answerContainer, { timeout: firstRenderTimeoutMs });
   } catch {
-    throw new PerplexityTimeoutError('answer-not-rendered', 60_000);
+    throw new PerplexityTimeoutError('answer-not-rendered', firstRenderTimeoutMs);
   }
 
   while (Date.now() - start < totalTimeoutMs) {
@@ -180,11 +187,26 @@ export async function scrapeOnce({ prompt, model = 'best', tool, focus = 'web', 
     await waitForAnswerStable(page, {
       totalTimeoutMs: isDeep ? DEEP_TIMEOUT_MS : FAST_TIMEOUT_MS,
       stableMs: isDeep ? 15_000 : 3_000,
+      // DR often waits 2–4 min before the first markdown-content phase appears.
+      firstRenderTimeoutMs: isDeep ? 300_000 : 60_000,
       onProgress,
     });
 
     // Optional extra settle for DR so late citations/steps land.
     if (isDeep) await humanPause(page, 2_000, 4_000);
+
+    // Open the Sources overlay before grabbing HTML so parse.js can extract
+    // the source cards. Overlay contents are conditionally rendered — if
+    // the button doesn't exist (e.g. no sources for this query), skip.
+    try {
+      const sourcesBtn = page.locator(SELECTORS.sourcesButton).first();
+      if (await sourcesBtn.isVisible({ timeout: 2_000 }).catch(() => false)) {
+        await humanClick(page, sourcesBtn);
+        await humanPause(page, 600, 1_200);
+      }
+    } catch {
+      // Sources overlay failed to open; parse.js will return empty sources[].
+    }
 
     const html = await page.content();
     const url = page.url();

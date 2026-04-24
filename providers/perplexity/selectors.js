@@ -49,8 +49,9 @@ export const SELECTORS = {
   // menuRadio(label) targets Radix menuitemradio items in either menu.
   // NOTE: this is a function, not a string — call it: `menuRadio("Claude")`.
   menuRadio: (label) => `[role="menuitemradio"]:has-text("${label}")`,
-  // "Sources" button opens the sources overlay panel during live runs.
-  sourcesButton: 'button:has-text(/^sources$/i)',
+  // "N sources" button opens the sources overlay panel during live runs.
+  // Text is like "10 sources" or "5 sources"; substring match catches either.
+  sourcesButton: 'button:has-text("sources")',
 
   // --- scrape layer TBD (resolve during Task 11-13 smoke tests) ---
   // generatingIndicator, doneIndicator, and deepResearchProgressText need a
