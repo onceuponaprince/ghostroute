@@ -1,6 +1,7 @@
 import express from 'express';
 import { askGrok } from './grok-reverse-api-grok-main.js';
-import { askPerplexity } from './providers/perplexity/index.js';
+import { askPerplexity, askPerplexityDeep } from './providers/perplexity/index.js';
+import { createJobStore } from './providers/perplexity/jobs.js';
 import {
   PerplexityAuthError,
   PerplexityScrapeError,
@@ -10,6 +11,8 @@ import {
 
 export const app = express();
 app.use(express.json());
+
+const perplexityJobs = createJobStore();
 
 const MAX_PORT_TRIES = 10;
 
@@ -38,6 +41,24 @@ app.post('/ask-perplexity', async (req, res) => {
   } catch (err) {
     return respondPerplexityError(res, err);
   }
+});
+
+app.post('/ask-perplexity/deep', (req, res) => {
+  const { prompt, model, focus, threadId, raw } = req.body || {};
+  if (!prompt) return res.status(400).json({ error: 'No prompt provided' });
+
+  try {
+    const { jobId } = askPerplexityDeep({ prompt, model, focus, threadId, raw, store: perplexityJobs });
+    res.status(202).json({ jobId });
+  } catch (err) {
+    return respondPerplexityError(res, err);
+  }
+});
+
+app.get('/ask-perplexity/deep/:jobId', (req, res) => {
+  const job = perplexityJobs.get(req.params.jobId);
+  if (!job) return res.status(404).json({ error: 'JobNotFound' });
+  res.json(job);
 });
 
 function respondPerplexityError(res, err) {

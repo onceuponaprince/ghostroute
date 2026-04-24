@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import request from 'supertest';
+import { createJobStore } from './providers/perplexity/jobs.js';
 
 vi.mock('./providers/perplexity/index.js', () => ({
   askPerplexity: vi.fn(),
@@ -64,6 +65,45 @@ describe('POST /ask-perplexity', () => {
       focus: 'academic',
       threadId: 'continued',
       raw: true,
+    }));
+  });
+});
+
+describe('POST /ask-perplexity/deep + GET /ask-perplexity/deep/:jobId', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('POST returns 202 with jobId', async () => {
+    const { askPerplexityDeep } = await import('./providers/perplexity/index.js');
+    askPerplexityDeep.mockReturnValueOnce({ jobId: 'fake-uuid-123' });
+
+    const res = await request(app)
+      .post('/ask-perplexity/deep')
+      .send({ prompt: 'what are the latest advancements in fusion energy?' });
+
+    expect(res.status).toBe(202);
+    expect(res.body.jobId).toBe('fake-uuid-123');
+  });
+
+  it('POST returns 400 on missing prompt', async () => {
+    const res = await request(app).post('/ask-perplexity/deep').send({});
+    expect(res.status).toBe(400);
+  });
+
+  it('GET returns 404 for unknown jobId', async () => {
+    const res = await request(app).get('/ask-perplexity/deep/no-such-job');
+    expect(res.status).toBe(404);
+    expect(res.body.error).toBe('JobNotFound');
+  });
+
+  it('POST forwards model, focus, threadId, raw to askPerplexityDeep', async () => {
+    const { askPerplexityDeep } = await import('./providers/perplexity/index.js');
+    askPerplexityDeep.mockReturnValueOnce({ jobId: 'x' });
+    await request(app)
+      .post('/ask-perplexity/deep')
+      .send({ prompt: 'x', model: 'claude', focus: 'academic', threadId: 't', raw: true });
+    expect(askPerplexityDeep).toHaveBeenCalledWith(expect.objectContaining({
+      prompt: 'x', model: 'claude', focus: 'academic', threadId: 't', raw: true,
+      store: expect.anything(),
     }));
   });
 });
