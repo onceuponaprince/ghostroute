@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { PerplexityAuthError, PerplexityScrapeError } from './errors.js';
 import { SELECTORS, FOCUS_URLS } from './selectors.js';
+import { humanClick, humanPause } from './human.js';
 
 const COOKIE_PATH = path.join(os.homedir(), '.claude', 'cookie-configs', 'perplexity.ai-cookies.json');
 
@@ -13,15 +14,31 @@ export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
   }
   const cookies = JSON.parse(fs.readFileSync(COOKIE_PATH, 'utf8'));
 
-  // headless: false is load-bearing. Cloudflare detects the headless flag
-  // directly and serves a verify-human interstitial that returns ~31 KB of
-  // challenge HTML instead of the ~360 KB app payload. Tested with stock
-  // Playwright headed, patchright (stealth-patched) headless+Chrome-channel,
-  // and persistent context headless — only headed passes the gate.
-  // For headless servers, run under Xvfb.
-  const browser = await chromium.launch({ headless: false });
+  // Two layers of automation detection to defeat:
+  //
+  // 1) Cloudflare challenge — gets tripped by the `headless` flag itself.
+  //    Running headed with stock Playwright passes it. Tested patchright
+  //    (stealth-patched Playwright) + persistent context + Chrome channel,
+  //    all in headless — none bypassed. Only `headless: false` works.
+  //    For headless servers, run under Xvfb.
+  //
+  // 2) Perplexity's own Pro-feature gating — serves a stub Model menu (only
+  //    "Sonar") to detected automation. Bypassed by disabling the blink
+  //    automation flag, suppressing the --enable-automation default arg,
+  //    and overriding navigator.webdriver at JS level. Without these, the
+  //    full model list (7 models) is hidden.
+  const browser = await chromium.launch({
+    headless: false,
+    args: ['--disable-blink-features=AutomationControlled'],
+    ignoreDefaultArgs: ['--enable-automation'],
+  });
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
   await context.addCookies(cookies);
+  await context.addInitScript(() => {
+    Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+    window.chrome = window.chrome || { runtime: {} };
+    Object.defineProperty(navigator, 'languages', { get: () => ['en-US', 'en'] });
+  });
   const page = await context.newPage();
 
   // Threading wins over focus — continuing a thread navigates to its URL directly.
@@ -49,4 +66,40 @@ export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
   }
 
   return { browser, context, page };
+}
+
+const MODE_LABELS = {
+  auto: 'Auto',
+  pro: 'Pro',
+  reasoning: 'Reasoning',
+};
+
+export async function selectMode(page, mode) {
+  if (mode === 'auto') return; // default
+
+  // Deep Research has its own dedicated button (separate from the Model menu).
+  if (mode === 'deep-research') {
+    try {
+      await humanClick(page, page.locator(SELECTORS.deepResearchButton));
+      await humanPause(page, 300, 700);
+    } catch {
+      throw new PerplexityScrapeError('select-mode', SELECTORS.deepResearchButton, await page.content());
+    }
+    return;
+  }
+
+  // Pro / Reasoning live inside the Model menu.
+  const label = MODE_LABELS[mode];
+  if (!label) {
+    throw new PerplexityScrapeError('select-mode', 'unknown mode', `mode=${mode}`);
+  }
+
+  try {
+    await humanClick(page, page.locator(SELECTORS.modeButton));
+    await humanPause(page, 400, 900);  // wait for Radix menu to render
+    await humanClick(page, page.locator(SELECTORS.modeOption(label)));
+    await humanPause(page, 200, 500);
+  } catch {
+    throw new PerplexityScrapeError('select-mode', SELECTORS.modeButton, await page.content());
+  }
 }

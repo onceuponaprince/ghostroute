@@ -39,7 +39,7 @@ export const SELECTORS = {
   promptInput: 'div[contenteditable="true"][role="textbox"]',
   submitKey: 'Enter',
   // The `+` button opens the Auto/Pro/Reasoning menu.
-  modeButton: 'button[aria-haspopup="menu"][label="Add files or tools"]',
+  modeButton: 'button[aria-label="Add files or tools"]',
   // Menu items inside the `+` dropdown, keyed by visible label ("Pro", "Reasoning").
   // NOTE: `modeOption` is a function, not a string — call it: `modeOption("Pro")`.
   modeOption: (label) => `[role="menuitem"]:has-text("${label}")`,

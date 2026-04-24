@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { launchAndNavigate } from './scrape.js';
+import { launchAndNavigate, selectMode } from './scrape.js';
 
 const smoke = process.env.SMOKE === '1';
 
@@ -23,6 +23,33 @@ describe.skipIf(!smoke)('scrape — live browser (SMOKE=1)', () => {
     const { page, browser } = await launchAndNavigate({ focus: 'academic' });
     try {
       expect(page.url()).toMatch(/perplexity\.ai\/academic/);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+});
+
+// Mode selection tests are SKIPPED pending spec re-scope. The current
+// Perplexity UI has no "Pro" / "Reasoning" / "Deep Research" buttons — it
+// has a Model menu with 7 models (Best, Sonar, GPT-5.4, Gemini 3.1 Pro,
+// Claude Sonnet 4.6, Kimi K2.6, Nemotron 3 Super) and no visible Deep
+// Research toggle. See PROGRESS.md / scratch notes.
+describe.skip('scrape — mode selection (BLOCKED on spec re-scope)', () => {
+  it('selects Pro mode via the + menu without error', async () => {
+    const { page, browser } = await launchAndNavigate();
+    try {
+      await selectMode(page, 'pro');
+      expect(true).toBe(true);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it('selects Deep Research via dedicated button', async () => {
+    const { page, browser } = await launchAndNavigate();
+    try {
+      await selectMode(page, 'deep-research');
+      expect(true).toBe(true);
     } finally {
       await browser.close();
     }
