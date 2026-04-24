@@ -169,7 +169,7 @@ async fn wait_for_conversation(page: &Page) -> Result<()> {
             .evaluate(
                 r#"
                 (() => {
-                    return document.querySelector('user-query, model-response, .user-query-content, .model-response-text') !== null;
+                    return document.querySelector('user-query, model-response') !== null;
                 })();
                 "#,
             )
@@ -195,16 +195,29 @@ async fn extract_conversation(page: &Page) -> Result<Vec<Message>> {
         .evaluate(
             r#"
             (() => {
+                // Match only the outer custom elements. Older selectors also matched
+                // .user-query-content / .model-response-text inside them, which caused
+                // every model turn to be captured twice.
+                const UI_LABELS = new Set([
+                    'You said',
+                    'Show thinking',
+                    'Gemini said',
+                ]);
+
+                const stripLeadingLabels = (text) => {
+                    const lines = (text || '').split('\n');
+                    let start = 0;
+                    while (start < lines.length && (lines[start].trim() === '' || UI_LABELS.has(lines[start].trim()))) {
+                        start++;
+                    }
+                    return lines.slice(start).join('\n').trim();
+                };
+
                 const messages = [];
-                const nodes = document.querySelectorAll(
-                    'user-query, model-response, .user-query-content, .model-response-text'
-                );
-                nodes.forEach(node => {
+                document.querySelectorAll('user-query, model-response').forEach(node => {
                     const tag = (node.tagName || '').toLowerCase();
-                    const cls = typeof node.className === 'string' ? node.className : '';
-                    const isUser = tag.includes('user') || cls.includes('user');
-                    const role = isUser ? 'user' : 'model';
-                    const content = (node.innerText || '').trim();
+                    const role = tag === 'user-query' ? 'user' : 'model';
+                    const content = stripLeadingLabels(node.innerText || '');
                     if (content.length > 0) {
                         messages.push({ role, content });
                     }
