@@ -662,9 +662,10 @@ describe('parse — Deep Research steps', () => {
     });
     expect(Array.isArray(result.steps)).toBe(true);
     expect(result.steps.length).toBeGreaterThanOrEqual(1);
+    const validPhases = ['identifying', 'searching', 'insights', 'other'];
     for (const step of result.steps) {
       expect(typeof step.query).toBe('string');
-      expect(typeof step.pagesVisited).toBe('number');
+      expect(validPhases).toContain(step.phase);
     }
   });
 
@@ -689,9 +690,11 @@ Expected: new Deep Research test FAILS, non-DR test PASSES (no steps field yet).
 Append to `providers/perplexity/selectors.js` inside the `SELECTORS` object:
 
 ```js
-  stepItem: '[data-testid="dr-step"]',      // TODO(Task 10)
-  stepQuery: '.step-query',                  // TODO(Task 10)
-  stepPagesCount: '.step-pages-count',       // TODO(Task 10)
+  // Step items: buttons containing the distinctive text class cascade.
+  stepItem: 'button:has(div.font-sans.text-quiet.text-sm.select-none.truncate)',
+  stepQuery: 'div.font-sans.text-quiet.text-sm.select-none.truncate',
+  // Phase is derived from the <svg use> xlink:href; no text-based selector needed.
+  stepPhaseIcon: 'svg use',
 ```
 
 - [ ] **Step 4: Implement steps extraction**
@@ -726,15 +729,22 @@ export function parse(html, { url, mode } = {}) {
   return result;
 }
 
+const PHASE_BY_ICON = {
+  '#pplx-icon-blocks': 'identifying',
+  '#pplx-icon-world-search': 'searching',
+  '#pplx-icon-bolt': 'insights',
+};
+
 function extractSteps($) {
   const items = $(SELECTORS.stepItem);
   const out = [];
   items.each((_, el) => {
     const $el = $(el);
     const query = $el.find(SELECTORS.stepQuery).first().text().trim();
-    const pagesText = $el.find(SELECTORS.stepPagesCount).first().text().trim();
-    const pagesVisited = Number.parseInt(pagesText, 10) || 0;
-    if (query) out.push({ query, pagesVisited });
+    const iconRef = $el.find(SELECTORS.stepPhaseIcon).first().attr('xlink:href')
+      || $el.find(SELECTORS.stepPhaseIcon).first().attr('href');
+    const phase = PHASE_BY_ICON[iconRef] || 'other';
+    if (query) out.push({ query, phase });
   });
   return out;
 }
@@ -955,9 +965,9 @@ xdg-open providers/perplexity/__fixtures__/auto-web.html
 | `sourceUrl` | the source's link |
 | `sourceSnippet` | the source's excerpt/snippet, if present |
 | `citationAnchor` | each inline `[N]` citation link inside the answer |
-| `stepItem` | (DR only) each step card |
-| `stepQuery` | (DR only) the search query text inside a step |
-| `stepPagesCount` | (DR only) the pages-visited number inside a step |
+| `stepItem` | (DR only) each step button |
+| `stepQuery` | (DR only) the step description text inside the button |
+| `stepPhaseIcon` | (DR only) the `<svg use>` inside the step button — read `xlink:href` |
 
 **Prefer** `[data-testid="..."]` and `[aria-label="..."]` over class names. Class names are minified and change across deploys.
 
@@ -999,7 +1009,7 @@ export const SELECTORS = {
   citationAnchor: 'FILL-IN-TASK-10',
   stepItem: 'FILL-IN-TASK-10',
   stepQuery: 'FILL-IN-TASK-10',
-  stepPagesCount: 'FILL-IN-TASK-10',
+  stepPhaseIcon: 'FILL-IN-TASK-10',
 
   // --- scrape layer (interact with live page) ---
   promptInput: 'FILL-IN-TASK-10',

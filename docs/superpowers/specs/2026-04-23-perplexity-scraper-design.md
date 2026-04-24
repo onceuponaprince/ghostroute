@@ -164,7 +164,7 @@ Output: the same JSON shape as the HTTP response, pretty-printed to stdout. Prog
     { index: 1, title: string, url: string, domain: string, snippet?: string }
   ],
   steps?: [                          // Deep Research only
-    { query: string, pagesVisited: number }
+    { query: string, phase: 'identifying' | 'searching' | 'insights' | 'other' }
   ],
   threadId: string,                  // from URL after submission
   raw?: {                            // only when raw: true in request
@@ -319,6 +319,21 @@ checklist item removed.
 Sources still extracted fully and indexed 1..N in `sources[]` as before.
 Callers that need citation-style rendering can cross-reference sources
 by position or by content-matching titles against the answer text.
+
+### 2026-04-24 — `steps[].pagesVisited` replaced with `steps[].phase`
+
+DR step dissection found no visible pages-visited count in the UI.
+Each step is an icon + text pair; pages visited is not exposed. Instead
+the icon identifies the step's phase:
+
+- `#pplx-icon-blocks` → `identifying`
+- `#pplx-icon-world-search` → `searching`
+- `#pplx-icon-bolt` → `insights`
+- anything else → `other`
+
+Return shape field renamed: `steps[].pagesVisited` → `steps[].phase`.
+`stepPagesCount` selector replaced by `stepPhaseIcon` (read the
+`xlink:href` of the `<svg use>` inside the step button).
 
 ### 2026-04-24 — focus filter re-scoped as URL navigation
 
