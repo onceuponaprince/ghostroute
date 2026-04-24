@@ -31,11 +31,17 @@ export const SELECTORS = {
   stepPhaseIcon: 'svg use',
 
   // --- scrape layer (interact with live page) ---
+  //
+  // Note: no `focusButton` / `focusOption` selectors exist. Focus filtering
+  // moved to URL-based routing in the 2026-04-24 spec revision — scrape.js
+  // navigates directly to `/academic`, `/finance`, etc. via FOCUS_URLS
+  // instead of clicking a dropdown. See spec §Revisions.
   promptInput: 'div[contenteditable="true"][role="textbox"]',
   submitKey: 'Enter',
   // The `+` button opens the Auto/Pro/Reasoning menu.
   modeButton: 'button[aria-haspopup="menu"][label="Add files or tools"]',
   // Menu items inside the `+` dropdown, keyed by visible label ("Pro", "Reasoning").
+  // NOTE: `modeOption` is a function, not a string — call it: `modeOption("Pro")`.
   modeOption: (label) => `[role="menuitem"]:has-text("${label}")`,
   // Dedicated button for Deep Research — sits outside the `+` menu.
   deepResearchButton: 'button:has-text("Deep Research")',
