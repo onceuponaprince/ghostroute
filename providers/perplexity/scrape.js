@@ -68,38 +68,50 @@ export async function launchAndNavigate({ focus = 'web', threadId } = {}) {
   return { browser, context, page };
 }
 
-const MODE_LABELS = {
-  auto: 'Auto',
-  pro: 'Pro',
-  reasoning: 'Reasoning',
+// Model enum → menu label. Labels use prefix-matching so UI version bumps
+// (e.g. "Claude Sonnet 4.6" → "Claude Sonnet 5.0") still work.
+const MODEL_LABELS = {
+  best: 'Best',
+  sonar: 'Sonar',
+  gpt: 'GPT',
+  gemini: 'Gemini',
+  claude: 'Claude',
+  kimi: 'Kimi',
+  nemotron: 'Nemotron',
 };
 
-export async function selectMode(page, mode) {
-  if (mode === 'auto') return; // default
+// Tool enum → + menu label.
+const TOOL_LABELS = {
+  'deep-research': 'Deep research',
+};
 
-  // Deep Research has its own dedicated button (separate from the Model menu).
-  if (mode === 'deep-research') {
-    try {
-      await humanClick(page, page.locator(SELECTORS.deepResearchButton));
-      await humanPause(page, 300, 700);
-    } catch {
-      throw new PerplexityScrapeError('select-mode', SELECTORS.deepResearchButton, await page.content());
-    }
-    return;
-  }
-
-  // Pro / Reasoning live inside the Model menu.
-  const label = MODE_LABELS[mode];
+export async function selectModel(page, model = 'best') {
+  const label = MODEL_LABELS[model];
   if (!label) {
-    throw new PerplexityScrapeError('select-mode', 'unknown mode', `mode=${mode}`);
+    throw new PerplexityScrapeError('select-model', 'unknown model', `model=${model}`);
   }
-
   try {
-    await humanClick(page, page.locator(SELECTORS.modeButton));
-    await humanPause(page, 400, 900);  // wait for Radix menu to render
-    await humanClick(page, page.locator(SELECTORS.modeOption(label)));
+    await humanClick(page, page.locator(SELECTORS.modelButton));
+    await humanPause(page, 400, 900);
+    await humanClick(page, page.locator(SELECTORS.menuRadio(label)));
     await humanPause(page, 200, 500);
   } catch {
-    throw new PerplexityScrapeError('select-mode', SELECTORS.modeButton, await page.content());
+    throw new PerplexityScrapeError('select-model', SELECTORS.modelButton, await page.content());
+  }
+}
+
+export async function selectTool(page, tool) {
+  if (!tool) return; // no tool selected → leave the menu closed
+  const label = TOOL_LABELS[tool];
+  if (!label) {
+    throw new PerplexityScrapeError('select-tool', 'unknown tool', `tool=${tool}`);
+  }
+  try {
+    await humanClick(page, page.locator(SELECTORS.toolsButton));
+    await humanPause(page, 400, 900);
+    await humanClick(page, page.locator(SELECTORS.menuRadio(label)));
+    await humanPause(page, 200, 500);
+  } catch {
+    throw new PerplexityScrapeError('select-tool', SELECTORS.toolsButton, await page.content());
   }
 }

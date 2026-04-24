@@ -32,19 +32,23 @@ export const SELECTORS = {
 
   // --- scrape layer (interact with live page) ---
   //
-  // Note: no `focusButton` / `focusOption` selectors exist. Focus filtering
-  // moved to URL-based routing in the 2026-04-24 spec revision — scrape.js
-  // navigates directly to `/academic`, `/finance`, etc. via FOCUS_URLS
-  // instead of clicking a dropdown. See spec §Revisions.
+  // Note: no `focusButton` selector exists. Focus filtering moved to
+  // URL-based routing in the 2026-04-24 spec revision — scrape.js navigates
+  // directly to `/academic`, `/finance`, etc. via FOCUS_URLS instead of
+  // clicking a dropdown. See spec §Revisions.
+  //
+  // Current Perplexity UI exposes two orthogonal menus we drive:
+  //   1. Model menu  — `button[aria-label="Model"]`, picks the LLM.
+  //   2. Tools menu  — `button[aria-label="Add files or tools"]` (the `+`
+  //      button), contains Computer / Deep research / file-upload actions.
+  // Both menus use Radix `menuitemradio` items keyed by visible label.
   promptInput: 'div[contenteditable="true"][role="textbox"]',
   submitKey: 'Enter',
-  // The `+` button opens the Auto/Pro/Reasoning menu.
-  modeButton: 'button[aria-label="Add files or tools"]',
-  // Menu items inside the `+` dropdown, keyed by visible label ("Pro", "Reasoning").
-  // NOTE: `modeOption` is a function, not a string — call it: `modeOption("Pro")`.
-  modeOption: (label) => `[role="menuitem"]:has-text("${label}")`,
-  // Dedicated button for Deep Research — sits outside the `+` menu.
-  deepResearchButton: 'button:has-text("Deep Research")',
+  modelButton: 'button[aria-label="Model"]',
+  toolsButton: 'button[aria-label="Add files or tools"]',
+  // menuRadio(label) targets Radix menuitemradio items in either menu.
+  // NOTE: this is a function, not a string — call it: `menuRadio("Claude")`.
+  menuRadio: (label) => `[role="menuitemradio"]:has-text("${label}")`,
   // "Sources" button opens the sources overlay panel during live runs.
   sourcesButton: 'button:has-text(/^sources$/i)',
 
