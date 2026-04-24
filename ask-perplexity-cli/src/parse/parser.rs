@@ -117,6 +117,7 @@ fn extract_steps(document: &Html) -> Result<Vec<Step>, ParseError> {
     let icon_sel = compile(STEP_PHASE_ICON)?;
 
     let mut out = Vec::new();
+    let mut unknown_icons: std::collections::BTreeSet<String> = Default::default();
     for button in document.select(&button_sel) {
         // Heuristic matches parse.js: step buttons contain a div with the
         // distinctive text class cascade. Other buttons won't have this.
@@ -136,10 +137,18 @@ fn extract_steps(document: &Html) -> Result<Vec<Step>, ParseError> {
                     .or_else(|| u.value().attr("href"))
             })
             .unwrap_or("");
-        out.push(Step {
-            query,
-            phase: phase_by_icon(icon_ref),
-        });
+        let phase = phase_by_icon(icon_ref);
+        if matches!(phase, Phase::Other) && !icon_ref.is_empty() {
+            unknown_icons.insert(icon_ref.to_string());
+        }
+        out.push(Step { query, phase });
+    }
+    if !unknown_icons.is_empty() {
+        eprintln!(
+            "[warn] extract_steps: unmapped DR phase icons {:?} \
+             — update phase_by_icon() in src/config/mod.rs to classify them",
+            unknown_icons.into_iter().collect::<Vec<_>>()
+        );
     }
     Ok(out)
 }
