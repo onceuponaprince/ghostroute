@@ -1,6 +1,6 @@
 use anyhow::Result;
 use chromiumoxide::Element;
-use rand::{rng, Rng};
+use rand::{rng, RngExt};
 use std::time::Duration;
 use tokio::time::sleep;
 
@@ -67,10 +67,8 @@ pub async fn human_type(element: &Element, text: &str) -> Result<()> {
 /// down/up delay. chromiumoxide's default .click() teleports.
 pub async fn human_click(page: &chromiumoxide::Page, element: &Element) -> Result<()> {
     // chromiumoxide 0.7 doesn't expose a simple `move_mouse` — use CDP directly.
-    let bb = element
-        .bounding_box()
-        .await?
-        .ok_or_else(|| anyhow::anyhow!("element has no bounding box"))?;
+    // bounding_box() returns Result<BoundingBox> directly in 0.7.
+    let bb = element.bounding_box().await?;
     let target_x = bb.x + bb.width / 2.0;
     let target_y = bb.y + bb.height / 2.0;
 
