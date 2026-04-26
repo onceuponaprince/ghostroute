@@ -2,7 +2,7 @@
 
 Carry Gemini conversations into Claude without blowing the context budget.
 
-`fast-travel-cli` is the Gemini sibling to [`ask-grok-cli`](https://github.com/onceuponaprince/ghostroute/tree/main/ask-grok-cli). Both belong to the context-hygiene layer: side-LLM outputs are only useful to Claude if they can enter a Claude session without pasting entire transcripts. `ask-grok-cli` writes a prompt into Grok and returns the answer. `fast-travel-cli` inverts the direction — it reads a conversation the user already had with Gemini in another tab and emits it as markdown to stdout.
+`fast-travel-cli` is the Gemini sibling to [`ask-grok-cli`](../ask-grok-cli/). Both belong to the context-hygiene layer: side-LLM outputs are only useful to Claude if they can enter a Claude session without pasting entire transcripts. `ask-grok-cli` writes a prompt into Grok and returns the answer. `fast-travel-cli` inverts the direction — it reads a conversation the user already had with Gemini in another tab and emits it as markdown to stdout.
 
 ## First-run scope
 
@@ -29,7 +29,7 @@ The binary lands at `target/release/fast-travel-cli`. No `cargo install` yet —
 
 ### 1. Install cookie-master-key
 
-Load the Chrome extension at [`ghostroute/cookie-master-key/`](https://github.com/onceuponaprince/ghostroute/tree/main/cookie-master-key) as an unpacked extension (`chrome://extensions/` → enable Developer Mode → *Load unpacked*).
+Load the Chrome extension at [`../cookie-master-key/`](../cookie-master-key/) as an unpacked extension (`chrome://extensions/` → enable Developer Mode → *Load unpacked*).
 
 ### 2. Export cookies from an authenticated Gemini tab
 
