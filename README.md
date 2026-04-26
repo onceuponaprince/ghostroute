@@ -121,6 +121,86 @@ Short form — the full version is in [`docs/architecture.md`](docs/architecture
 - **Session-reuse over API keys.** API credits die when they die; cookie-reuse survives as long as the user can log in.
 - **Monorepo of providers.** Each side-LLM lands as `providers/<name>/`. New providers do not spawn new repos.
 
+## Provider contract
+
+A provider is whatever code reaches into a side-LLM's authenticated browser session and brings something back. Every provider in this repo speaks the same contract on three axes — input, output, transport — so the layer composes uniformly even as individual scrapers diverge in their internals.
+
+### Input
+
+A plain JavaScript object (Node) or a `clap`-parsed args struct (Rust). Required fields are minimal — usually a prompt or a target URL. Optional fields tune model selection, focus area, thread continuation, or raw-passthrough flags. Providers do not accept secrets in the call: cookies live at `~/.claude/cookie-configs/<hostname>-cookies.json` and are read at scrape time.
+
+```js
+// Node — providers/perplexity/index.js
+askPerplexity({ prompt, model, tool, focus, threadId, raw })
+```
+
+```rust
+// Rust — ask-perplexity-cli
+ask-perplexity-cli "<prompt>" [--model ...] [--focus ...] [--thread ...] [--deep] [--raw]
+```
+
+### Output
+
+A single JSON object. The minimum shape is `{ answer | result }` for prompt-and-return providers and `{ markdown }` for pure-read providers. Providers that surface citations add `sources[]`. Providers with multi-stage progress (Perplexity Deep Research) add `steps[]`. Providers that expose the raw upstream response add `raw`. Errors throw on the Node side and surface as non-zero exit codes plus stderr on the Rust side; HTTP transports translate to 4xx/5xx with `{ error, details? }`.
+
+The contract is extensible by addition. New optional fields land alongside existing ones; established field names (`answer`, `sources`, `threadId`, `steps`, `raw`) carry the same meaning across providers.
+
+### Transport
+
+Three shapes, picked per-provider by what fits:
+
+- **HTTP** — `server.js` mounts each provider as an Express endpoint. Synchronous requests return the JSON shape directly. Long-running requests (Deep Research) split into a `POST` that returns `{ jobId }` immediately and a `GET /:jobId` that polls.
+- **Shell** — Each Rust CLI is a single binary that emits JSON to stdout, progress to stderr. Pipe directly into `jq`. Exit code zero on success, non-zero on failure with the cause on stderr.
+- **Stdio (planned)** — MCP wrapping over the same provider functions. Tracked under the delegate-agent scenes in the Command Centre campaign; not yet wired.
+
+A provider can support multiple transports without rewriting its core logic — the function lives in `providers/<name>/index.js` and the transports are thin wrappers over it.
+
+## Add a provider
+
+Drop a side-LLM into the monorepo by following the shape Perplexity established. The walkthrough below assumes you are adding `providers/<name>/` with a Node scraper; an accompanying Rust CLI sibling is optional and lands as `ask-<name>-cli/` at the repo root.
+
+### Directory shape
+
+```
+providers/<name>/
+├── index.js              # exports the public function (e.g. askFoo)
+├── scrape.js             # browser automation: navigate, type, wait, extract HTML
+├── parse.js              # pure HTML → JSON; no network, fully unit-testable
+├── selectors.js          # CSS selectors as named constants (one place to fix on UI drift)
+├── human.js              # typing jitter, click trails, pause helpers (copy from siblings)
+├── jobs.js               # only if the provider has long-running async modes
+├── errors.js             # named error classes the transport layer can switch on
+├── __fixtures__/         # captured HTML samples for parse-layer unit tests
+│   └── *.html
+├── parse.test.js         # parse layer against fixtures (fast; runs by default)
+├── scrape.test.js        # live scrape (skipped by default; SMOKE=1 to enable)
+└── README.md             # provider-specific doc; see existing providers for shape
+```
+
+### Required surface
+
+- **`index.js`** must export a single async function whose name follows `ask<Name>` and whose signature is `({ prompt, ...options })`. The function returns the JSON object documented in the provider contract.
+- **`parse.js`** must be pure — no network, no browser. Given an HTML string and a URL, it returns the JSON. This is what the unit tests exercise.
+- **`scrape.js`** owns the browser. It uses `puppeteer-extra` with the stealth plugin, reads cookies from `~/.claude/cookie-configs/<hostname>-cookies.json`, and runs **headed** by default. Most provider Pro features detect the `headless` flag.
+- **`selectors.js`** keeps every CSS selector as an exported constant. When the provider's UI shifts, this is the only file that should need editing.
+
+### Wiring transports
+
+- **HTTP.** Add an endpoint to `server.js` that imports `ask<Name>` from `providers/<name>/index.js` and translates `req.body` into its options. Return the result as JSON. Errors caught by the route handler become 5xx responses with `{ error, details }`.
+- **Rust CLI.** Add `ask-<name>-cli/` at the repo root with its own `Cargo.toml`. Mirror `ask-perplexity-cli/`'s structure — `chromiumoxide` for browser, `clap` for args, `serde_json` for output. The Rust CLI does not depend on the Node provider; both reach the same upstream surface.
+
+### Tests
+
+- **Parse tests run by default.** `npm test` exercises every `*.test.js` file. Parse-layer tests load fixtures from `__fixtures__/` and assert on the JSON shape — no browser, no network, sub-second runs.
+- **Scrape tests are smoke-gated.** `SMOKE=1 npm run test:e2e:perplexity` runs the live scrape against the real provider; the same pattern applies for new providers (`test:e2e:<name>`). These need cookies and a display.
+- **Capture fixtures from real responses.** When you build a new provider, save a few real HTML responses under `__fixtures__/` — enough to cover the response variants the parser must handle. Strip personal data before committing.
+
+### Documentation
+
+- Add `providers/<name>/README.md` describing the provider's state (skeleton / scaffolded / shipped), the input options it accepts, the JSON shape it emits, and any quirks (e.g. Perplexity hides the model menu on `/academic` routes).
+- Reference the new provider from the root README's Components and Providers sections.
+- If the provider is non-trivial, add a design spec under `docs/superpowers/specs/<date>-<provider>-scraper-design.md` before writing the code.
+
 ## Conventions
 
 - **Cookies** live outside the repo at `~/.claude/cookie-configs/<hostname>-cookies.json`. Never committed.
