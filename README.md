@@ -4,7 +4,7 @@ A context-hygiene layer for side-LLM integration. Ghostroute is a monorepo of pr
 
 Every provider reuses an authenticated browser session instead of a paid API key. The trade is deliberate: API credits expire and API shapes change, but a cookie-driven session-reuse scraper keeps working as long as the user can log in. See [`docs/architecture.md`](docs/architecture.md) for the full rationale.
 
-Two repos, N providers. Ghostroute is the monorepo. `fast-travel-cli` (Gemini, read-side) lives outside as a sibling Rust CLI at [`~/code/fast-travel-cli/`](https://github.com/onceuponaprince/fast-travel-cli).
+One repo, N providers. Ghostroute houses every side-LLM scraper as a peer — Node providers under `providers/`, user-facing Rust CLIs at the root.
 
 ## Components
 
@@ -19,6 +19,9 @@ Two repos, N providers. Ghostroute is the monorepo. `fast-travel-cli` (Gemini, r
 
 - [`ask-grok-cli/`](ask-grok-cli/) — Terminal-first Grok client on `chromiumoxide`. Usable standalone or orchestrated by Claude Code. See its [README](ask-grok-cli/README.md).
 - [`ask-perplexity-cli/`](ask-perplexity-cli/) — Terminal-first Perplexity client on `chromiumoxide`. Mirrors the Node provider's scraping strategy and output shape; does not depend on a running server. Includes `--deep` (Deep Research, synchronous with progress to stderr), `--model`, `--focus`, `--thread`, `--raw`. See its [README](ask-perplexity-cli/README.md).
+- [`fast-travel-cli/`](fast-travel-cli/) — Terminal-first Gemini *reader* on `chromiumoxide`. Inverts the ask-* direction: extracts an existing Gemini conversation by URL and emits markdown to stdout. Pipe straight into `claude --resume`. See its [README](fast-travel-cli/README.md).
+
+All three crates pin the same `chromiumoxide = "0.9.1"` baseline.
 
 ### Chrome extension
 
@@ -56,6 +59,14 @@ Full taxonomy:
 - `focus`: `web` · `academic` · `finance` · `health` · `patents` (URL-routed entry pages)
 
 See [`docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md`](docs/superpowers/specs/2026-04-23-perplexity-scraper-design.md) for the full spec including the Revisions log.
+
+### Gemini — shipped (read-side)
+
+One surface, deliberately asymmetric:
+
+- **Rust CLI.** `fast-travel-cli --conversation-url https://gemini.google.com/app/<id>` — reads an existing Gemini conversation, emits `## User` / `## Model` markdown to stdout. Pipe straight into `claude --resume` or redirect to a file.
+
+There is no Gemini *write* surface (no `ask-gemini-cli`) yet — the Gemini use case ghostroute serves is "carry an existing conversation into Claude," not "ask a new question." Write-side may land later as a peer to `ask-grok-cli` / `ask-perplexity-cli`; for now read-side is the whole story. See [`docs/superpowers/specs/2026-04-27-fast-travel-cli-design.md`](docs/superpowers/specs/2026-04-27-fast-travel-cli-design.md) for the design rationale and revisions log.
 
 ### Future providers
 
@@ -111,6 +122,21 @@ cd ask-perplexity-cli
 ./target/release/ask-perplexity-cli --model claude --focus academic "who founded meta?"
 ./target/release/ask-perplexity-cli --deep "state of fusion energy"
 ```
+
+### Gemini via Rust CLI
+
+```bash
+cd fast-travel-cli
+cargo build --release
+
+# Pipe a Gemini conversation straight into Claude
+./target/release/fast-travel-cli --conversation-url https://gemini.google.com/app/<id> | claude --resume
+
+# Or capture to a file
+./target/release/fast-travel-cli --conversation-url https://gemini.google.com/app/<id> > conversation.md
+```
+
+Cookies expected at `~/.claude/cookie-configs/gemini.google.com-cookies.json` (export from an authenticated Gemini tab via cookie-master-key).
 
 ## Architecture overview
 

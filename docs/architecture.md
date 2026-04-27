@@ -13,7 +13,7 @@ Ghostroute installs a layer between the other LLMs and Claude. Instead of pastin
 Two directional shapes live in the layer:
 
 - **Prompt-and-return.** Claude writes a prompt, the scraper invokes a side-LLM browser session, the answer comes back. `ask-grok-cli` and the Node server's `/ask-grok` endpoint do this.
-- **Pure read.** The user has already had a conversation in a side-LLM browser tab; the scraper reads it and emits markdown. `fast-travel-cli` (in its own repo) does this for Gemini.
+- **Pure read.** The user has already had a conversation in a side-LLM browser tab; the scraper reads it and emits markdown. `fast-travel-cli` does this for Gemini.
 
 Both shapes share the same substrate — authenticated browser sessions, cookie-reuse, headless Chromium — so they land as siblings inside the same layer.
 
@@ -25,7 +25,7 @@ The split is honest, not doctrinal. Pick the language that fits the tool's centr
 
 **Node for scraper libraries.** Ghostroute's Node side originated from `grok-reverse-api` work that was already JS-shaped when the repo was founded. Playwright's session management, `puppeteer-extra-stealth` plugin for bot-detection evasion, and cheerio for HTML parsing are all first-class in Node. The scraping surface itself — HTTP server, DOM traversal, request shaping — has not earned a switch to Rust. The Node layer is where the provider logic lives.
 
-**Rust for user-facing CLIs.** Compiled single-binary tools feel right for terminal utilities invoked directly. `chromiumoxide` gives Rust parity for headless Chromium automation via the Chrome DevTools Protocol. `clap` gives it a terse, derive-friendly CLI parser. `tokio` gives it async. The Rust CLI side (`ask-grok-cli`, future `ask-perplexity-cli`, and in a separate repo `fast-travel-cli`) is where user-facing tools live.
+**Rust for user-facing CLIs.** Compiled single-binary tools feel right for terminal utilities invoked directly. `chromiumoxide` gives Rust parity for headless Chromium automation via the Chrome DevTools Protocol. `clap` gives it a terse, derive-friendly CLI parser. `tokio` gives it async. The Rust CLI side (`ask-grok-cli`, `ask-perplexity-cli`, `fast-travel-cli`) is where user-facing tools live, all pinned to the same `chromiumoxide` baseline.
 
 The outcome is a two-language split that accepts the upfront cost of maintaining both toolchains in exchange for each half fitting its job. The two sides communicate through the same cookie-jar format and the same filesystem conventions, so adding a new provider on one side does not require changing the other.
 
@@ -88,3 +88,4 @@ These files are retained rather than deleted because each encodes a real design 
 - [`server.md`](server.md) — `server.js` deep dive.
 - [`superpowers/specs/2026-04-22-ghostroute-monorepo-setup-design.md`](superpowers/specs/2026-04-22-ghostroute-monorepo-setup-design.md) — initial monorepo design.
 - [`superpowers/specs/2026-04-23-perplexity-scraper-design.md`](superpowers/specs/2026-04-23-perplexity-scraper-design.md) — second-provider design that confirmed the monorepo shape.
+- [`superpowers/specs/2026-04-27-fast-travel-cli-design.md`](superpowers/specs/2026-04-27-fast-travel-cli-design.md) — Gemini read-side surface; first migrated-in component.
