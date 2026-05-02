@@ -31,3 +31,41 @@ pub async fn probe_dom_state(page: &Page) -> Option<String> {
     let value = page.evaluate(js).await.ok()?;
     value.into_value::<String>().ok()
 }
+
+/// Dump the response-container state at stability-wait timeout. Surfaces the
+/// shape that matters for diagnosing *why* the wait failed: how many turns
+/// rendered, did the assistant turn arrive at all, what's the gap between
+/// `innerText` and `textContent` lengths (closed `<details>` widen this gap),
+/// and whether bullets / list items are present in the DOM but missing from
+/// the captured text.
+pub async fn probe_response_state(page: &Page, selector: &str) -> Option<String> {
+    // Selector is a static const in config/mod.rs; round-trip through JSON
+    // so any future quoting changes there don't break the JS payload.
+    let selector_literal = serde_json::to_string(selector).ok()?;
+    let js = format!(
+        r#"(() => {{
+          const els = Array.from(document.querySelectorAll({selector_literal}));
+          const describe = (e, i) => ({{
+            index: i,
+            id: e.id || null,
+            visible: !!(e.offsetWidth || e.offsetHeight),
+            innerTextLen: (e.innerText || '').length,
+            textContentLen: (e.textContent || '').length,
+            paragraphCount: e.querySelectorAll('p').length,
+            listItemCount: e.querySelectorAll('li').length,
+            detailsOpen: e.querySelectorAll('details[open]').length,
+            detailsClosed: e.querySelectorAll('details:not([open])').length,
+            preview: (e.innerText || '').slice(0, 200),
+          }});
+          return JSON.stringify({{
+            url: location.href,
+            title: document.title,
+            selector: {selector_literal},
+            responseCount: els.length,
+            responses: els.map(describe),
+          }}, null, 2);
+        }})()"#
+    );
+    let value = page.evaluate(js).await.ok()?;
+    value.into_value::<String>().ok()
+}

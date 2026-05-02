@@ -3,6 +3,8 @@ use chromiumoxide::{Element, Page};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
+use super::probe::probe_response_state;
+
 pub struct ResponseDetails {
     pub answer: String,
     pub paragraph_count: usize,
@@ -100,6 +102,14 @@ async fn wait_for_stable_response_text(
 
     if !last_candidate.is_empty() {
         return Ok(last_candidate);
+    }
+
+    if let Some(probe) = probe_response_state(page, response_selector).await {
+        eprintln!(
+            "[probe] response state at stability-wait timeout (selector='{response_selector}'):\n{probe}"
+        );
+    } else {
+        eprintln!("[probe] response-state probe itself failed — page may be unresponsive");
     }
 
     bail!(
