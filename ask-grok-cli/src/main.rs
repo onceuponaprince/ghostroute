@@ -16,7 +16,7 @@ mod ui;
 
 use automation::locators::{find_visible_locator, Position};
 use automation::response::collect_response_details;
-use automation::typing::{human_pause, human_type_with_typos};
+use automation::typing::{human_pause, human_type_with_typos, paste_text};
 use browser::bootstrap_browser_session;
 use cli::args::Args;
 use config::{INPUT_SELECTOR, INPUT_TIMEOUT_MS, RESPONSE_SELECTOR, RESPONSE_TIMEOUT_MS};
@@ -67,7 +67,7 @@ fn resolve_cookie_configs_dir() -> PathBuf {
         .join("cookie-configs")
 }
 
-fn resolve_global_cookie_path() -> Result<PathBuf> {
+fn resolve_global_cookie_paths() -> Result<Vec<PathBuf>> {
     let cookie_configs_dir = resolve_cookie_configs_dir();
     if !cookie_configs_dir.exists() {
         fs::create_dir_all(&cookie_configs_dir).with_context(|| {
@@ -78,15 +78,18 @@ fn resolve_global_cookie_path() -> Result<PathBuf> {
         })?;
     }
 
-    find_cookie_file_in_dir(&cookie_configs_dir).with_context(|| {
-        format!(
-            "No cookie file found. Place a '*-cookies.json' file in {}",
+    let paths = find_cookie_files_in_dir(&cookie_configs_dir)?;
+    if paths.is_empty() {
+        anyhow::bail!(
+            "No '*-cookies.json' file found in {}",
             cookie_configs_dir.display()
-        )
-    })
+        );
+    }
+    Ok(paths)
 }
 
-fn find_cookie_file_in_dir(dir: &Path) -> Result<PathBuf> {
+fn find_cookie_files_in_dir(dir: &Path) -> Result<Vec<PathBuf>> {
+    let mut paths = Vec::new();
     for entry in fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
@@ -96,11 +99,32 @@ fn find_cookie_file_in_dir(dir: &Path) -> Result<PathBuf> {
                 .and_then(|name| name.to_str())
                 .is_some_and(|name| name.ends_with("-cookies.json"))
         {
-            return Ok(path);
+            paths.push(path);
         }
     }
+    paths.sort();
+    Ok(paths)
+}
 
-    anyhow::bail!("No '*-cookies.json' file found in {}", dir.display());
+/// Read every `*-cookies.json` in the cookie dir and merge their cookie
+/// arrays into one JSON-encoded string. Grok's auth is bound to both
+/// `grok.com` and `x.com` (X SSO), so the previous "first file wins"
+/// loader silently dropped half the auth state.
+fn load_merged_cookies(paths: &[PathBuf]) -> Result<String> {
+    let mut merged: Vec<serde_json::Value> = Vec::new();
+    for path in paths {
+        let data = fs::read_to_string(path)
+            .with_context(|| format!("Failed to read cookie file {}", path.display()))?;
+        let arr: Vec<serde_json::Value> = serde_json::from_str(&data)
+            .with_context(|| format!("Cookie file {} is not a JSON array", path.display()))?;
+        eprintln!(
+            "[Infiltrating] Loaded {} cookies from {}",
+            arr.len(),
+            path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        merged.extend(arr);
+    }
+    Ok(serde_json::to_string(&merged)?)
 }
 
 fn build_compiled_prompt(save_state: &SaveState, user_prompt: &str) -> String {
@@ -132,20 +156,24 @@ fn build_compiled_prompt(save_state: &SaveState, user_prompt: &str) -> String {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
+
+    // ArgGroup guarantees exactly one of (prompt, prompt_file) is set.
+    let prompt: String = match (&args.prompt, &args.prompt_file) {
+        (Some(p), _) => p.clone(),
+        (None, Some(path)) => fs::read_to_string(path).with_context(|| {
+            format!("Failed to read --prompt-file {}", path.display())
+        })?,
+        (None, None) => unreachable!("clap ArgGroup requires one of prompt/prompt_file"),
+    };
+
     let started_at = Instant::now();
 
     ui::print_banner();
 
     eprintln!("{} Calibrating GPS coordinates...", "[System]".blue());
 
-    let global_cookie_path = resolve_global_cookie_path()?;
-    let cookie_data = fs::read_to_string(&global_cookie_path).with_context(|| {
-        format!(
-            "Failed to read cookie file {}. Place a '*-cookies.json' file in {}",
-            global_cookie_path.display(),
-            resolve_cookie_configs_dir().display()
-        )
-    })?;
+    let cookie_paths = resolve_global_cookie_paths()?;
+    let cookie_data = load_merged_cookies(&cookie_paths)?;
 
     let memory_file_path = resolve_memory_file_path();
     let memory_file = memory_file_path.to_str().unwrap();
@@ -168,7 +196,7 @@ let mut save_state = if PathBuf::from(memory_file).exists() {
 };
 
 // 2. COMPILE THE FULL PROMPT (Memory + New Task)
-let compiled_prompt = build_compiled_prompt(&save_state, &args.prompt);
+let compiled_prompt = build_compiled_prompt(&save_state, &prompt);
 
 // 3. THE MANA CHECK (Token Counting)
 // We use the standard cl100k_base encoding (used by GPT-4) as a highly accurate proxy for Grok
@@ -231,23 +259,29 @@ eprintln!("{} Input Cost: {} Mana (Tokens)", "[Mana Bar]".magenta(), input_token
             .await
             .context("Failed to click Grok input field")?;
         if !save_state.history.is_empty() {
-    // Instantly paste the previous context. Normalise newlines because CDP's
-    // single-char keymap has no entry for '\n' and chromiumoxide's type_str
-    // falls back to a per-char press which errors on keys it can't find.
-    let context_only = compiled_prompt
-        .replace(&args.prompt, "")
-        .replace(['\n', '\r', '\t'], " ");
+            // Instant-paste the previous context via CDP `Input.insertText`,
+            // which bypasses chromiumoxide's per-char keymap entirely. Newlines
+            // would submit the chat, so collapse \n\r\t -> space first.
+            let context_only = compiled_prompt
+                .replace(&prompt, "")
+                .replace(['\n', '\r', '\t'], " ");
 
-    chat_input
-        .type_str(&context_only)
-        .await
-        .context("Failed to paste previous context into input field")?;
-}
+            paste_text(&page, &context_only)
+                .await
+                .context("Failed to paste previous context into input field")?;
+        }
         human_pause(250, 700).await;
 
-        human_type_with_typos(&chat_input, &args.prompt)
-            .await
-            .context("Failed while typing prompt into input field")?;
+        if args.instant_paste {
+            eprintln!("[Engaging] --instant-paste set; skipping Drunk-Typist");
+            paste_text(&page, &prompt)
+                .await
+                .context("Failed while instant-pasting prompt")?;
+        } else {
+            human_type_with_typos(&page, &chat_input, &prompt)
+                .await
+                .context("Failed while typing prompt into input field")?;
+        }
         human_pause(300, 900).await;
 
         chat_input
@@ -273,7 +307,7 @@ eprintln!("{} Input Cost: {} Mana (Tokens)", "[Mana Bar]".magenta(), input_token
         let details = collect_response_details(
             &page,
             RESPONSE_SELECTOR,
-            &args.prompt,
+            &prompt,
             RESPONSE_TIMEOUT_MS as u64,
         )
         .await?;
@@ -291,7 +325,7 @@ eprintln!("{} Input Cost: {} Mana (Tokens)", "[Mana Bar]".magenta(), input_token
 
         save_state.history.push(Dialogue {
             speaker: "User".to_string(),
-            text: args.prompt.clone(),
+            text: prompt.clone(),
         });
         save_state.history.push(Dialogue {
             speaker: "Grok".to_string(),
@@ -329,7 +363,7 @@ eprintln!("{} Input Cost: {} Mana (Tokens)", "[Mana Bar]".magenta(), input_token
 #[cfg(test)]
 mod tests {
     use super::{
-        build_compiled_prompt, find_cookie_file_in_dir, resolve_cookie_configs_dir,
+        build_compiled_prompt, find_cookie_files_in_dir, resolve_cookie_configs_dir,
         resolve_memory_file_path, Dialogue, SaveState,
     };
     use std::fs;
@@ -374,8 +408,8 @@ mod tests {
         let cookie_file = temp_dir.join("grok.com-cookies.json");
         fs::write(&cookie_file, "[]").expect("cookie fixture should be written");
 
-        let found = find_cookie_file_in_dir(&temp_dir).expect("cookie file should be discovered");
-        assert_eq!(found, cookie_file);
+        let found = find_cookie_files_in_dir(&temp_dir).expect("cookie files should be discovered");
+        assert_eq!(found, vec![cookie_file]);
 
         fs::remove_dir_all(&temp_dir).expect("temp directory cleanup should succeed");
     }

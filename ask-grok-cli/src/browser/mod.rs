@@ -11,8 +11,20 @@ pub async fn bootstrap_browser_session(
     if !headless {
         builder = builder.with_head();
     }
+    // Per-pid profile dir: chromiumoxide's default temp dir gets locked between
+    // runs and second invocations exit cleanly with empty stderr (the historic
+    // 2026-04-27 failure mode). Unique per-pid sidesteps the lock entirely.
+    let user_data_dir = format!("/tmp/grok-{}", std::process::id());
     let config = builder
         .arg("--no-sandbox")
+        // /dev/shm is 64MB by default in many envs; Grok's React tree blows past
+        // it and the renderer dies silently mid-session. /tmp has room.
+        .arg("--disable-dev-shm-usage")
+        // GPU process death cascades into renderer death in headless. Kill it.
+        .arg("--disable-gpu")
+        // navigator.webdriver=true is the cheapest tell. xAI's anti-bot reads it.
+        .arg("--disable-blink-features=AutomationControlled")
+        .arg(format!("--user-data-dir={}", user_data_dir))
         .build()
         .map_err(|e| anyhow::anyhow!("Failed to build BrowserConfig: {}", e))?;
 

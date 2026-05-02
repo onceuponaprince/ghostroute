@@ -31,6 +31,14 @@ async fn element_inner_text(element: &Element) -> String {
         .unwrap_or_default()
 }
 
+/// Whitespace normaliser shared by both response filters. Browser's `innerText`
+/// preserves `\n` between block elements (paragraphs, lists), so a raw `!=`
+/// against the already-collapsed prompt always passes and the user bubble
+/// gets returned as if it were Grok's reply. Both sides must collapse.
+fn normalise_ws(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
 async fn wait_for_stable_response_text(
     page: &Page,
     response_selector: &str,
@@ -38,26 +46,39 @@ async fn wait_for_stable_response_text(
     timeout_ms: u64,
 ) -> Result<String> {
     let started = Instant::now();
-    let prompt_trimmed = prompt.trim();
+    // Match the form the browser's innerText actually returns: any consecutive
+    // whitespace (including \n / \r / \t / multiple spaces) collapses to a
+    // single space. Drunk-Typist strips \n→space individually but leaves \n\n
+    // as two spaces; the browser then collapses them to one. Without this
+    // normalisation, the user's prompt bubble passes the not-the-prompt filter
+    // and gets returned as Grok's response.
+    let prompt_trimmed: String = prompt.split_whitespace().collect::<Vec<_>>().join(" ");
     let mut last_candidate = String::new();
     let mut stable_ticks = 0_u8;
 
     loop {
         let mut newest_candidate = String::new();
         if let Ok(elements) = page.find_elements(response_selector).await {
-            for element in elements.into_iter().rev() {
-                let text = element_inner_text(&element).await;
-                let candidate = text.trim();
-                if !candidate.is_empty() && candidate != prompt_trimmed {
-                    newest_candidate = candidate.to_string();
-                    break;
+            // Grok's `[id^="response-"] .message-bubble` matches BOTH the user
+            // bubble (typed prompt) and the assistant bubble (Grok's reply).
+            // With a single match, the only thing to read is the user echo —
+            // which is by definition not yet a response. Wait for at least
+            // two matching elements before accepting any candidate.
+            if elements.len() >= 2 {
+                for element in elements.into_iter().rev() {
+                    let text = element_inner_text(&element).await;
+                    let candidate = text.trim();
+                    if !candidate.is_empty() && normalise_ws(candidate) != prompt_trimmed {
+                        newest_candidate = candidate.to_string();
+                        break;
+                    }
                 }
             }
         }
 
         let candidate = newest_candidate.trim();
 
-        if !candidate.is_empty() && candidate != prompt_trimmed {
+        if !candidate.is_empty() && normalise_ws(candidate) != prompt_trimmed {
             if candidate == last_candidate {
                 stable_ticks += 1;
             } else {
@@ -129,7 +150,7 @@ pub async fn collect_response_details(
         .collect::<Vec<_>>()
         .join("\n\n");
 
-    let answer = if !merged.is_empty() && merged != prompt.trim() {
+    let answer = if !merged.is_empty() && normalise_ws(&merged) != normalise_ws(prompt) {
         merged
     } else {
         raw_stable_text
