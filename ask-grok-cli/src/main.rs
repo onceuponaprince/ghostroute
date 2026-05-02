@@ -35,29 +35,59 @@ struct SaveState {
     total_mana_spent: usize,
 }
 
-fn resolve_project_root() -> PathBuf {
-    let git_root_output = Command::new("git")
+fn resolve_project_root_if_present() -> Option<PathBuf> {
+    let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
-        .output();
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let stdout = String::from_utf8_lossy(&output.stdout).trim().to_string();
+    if stdout.is_empty() {
+        None
+    } else {
+        Some(PathBuf::from(stdout))
+    }
+}
 
-    if let Ok(output) = git_root_output {
-        if output.status.success() {
-            return PathBuf::from(String::from_utf8_lossy(&output.stdout).trim().to_string());
+/// Decide where memory lives without touching the filesystem. Pure so the
+/// resolution logic is testable in isolation.
+///
+/// Use the project's `.claude/.swarm-memory.json` only when a `.claude/`
+/// directory **already exists** at git root — i.e. the user has intentionally
+/// opted that project into Claude-scoped state. Falls back to the global
+/// `~/.claude/.swarm-memory.json` (next to cookie-configs) otherwise.
+///
+/// The previous behaviour silently created `.claude/` in whatever cwd the
+/// binary launched from, which polluted unrelated repos with grok memory
+/// when the operator was in the wrong tree at invocation time.
+fn resolve_memory_file_path_with(project_root: Option<&Path>, home_dir: &Path) -> PathBuf {
+    if let Some(root) = project_root {
+        let project_claude = root.join(".claude");
+        if project_claude.is_dir() {
+            return project_claude.join(".swarm-memory.json");
         }
     }
-
-    env::current_dir().unwrap_or_else(|_| PathBuf::from("."))
+    home_dir.join(".claude").join(".swarm-memory.json")
 }
 
 fn resolve_memory_file_path() -> PathBuf {
-    let project_root = resolve_project_root();
-    let claude_dir = project_root.join(".claude");
-    if !claude_dir.exists() {
-        fs::create_dir_all(&claude_dir)
-            .expect("Failed to build the .claude Campfire directory!");
-    }
+    let project_root = resolve_project_root_if_present();
+    let home = env::var("HOME").expect("Could not find OS Home Directory!");
+    let home_dir = PathBuf::from(home);
+    let path = resolve_memory_file_path_with(project_root.as_deref(), &home_dir);
 
-    claude_dir.join(".swarm-memory.json")
+    // Only create the parent if it doesn't exist. Project branch already
+    // confirmed `.claude/` exists; global branch may need ~/.claude/ created
+    // on first run. Either way: never silently create .claude/ in a random cwd.
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent)
+                .expect("Failed to build the .claude Campfire directory!");
+        }
+    }
+    path
 }
 
 fn resolve_cookie_configs_dir() -> PathBuf {
@@ -364,9 +394,10 @@ eprintln!("{} Input Cost: {} Mana (Tokens)", "[Mana Bar]".magenta(), input_token
 mod tests {
     use super::{
         build_compiled_prompt, find_cookie_files_in_dir, resolve_cookie_configs_dir,
-        resolve_memory_file_path, Dialogue, SaveState,
+        resolve_memory_file_path_with, Dialogue, SaveState,
     };
     use std::fs;
+    use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
@@ -414,10 +445,45 @@ mod tests {
         fs::remove_dir_all(&temp_dir).expect("temp directory cleanup should succeed");
     }
 
+    fn unique_temp_dir(label: &str) -> PathBuf {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("System time should be after UNIX_EPOCH")
+            .as_nanos();
+        std::env::temp_dir().join(format!("ask-grok-cli-{label}-{nonce}"))
+    }
+
     #[test]
-    fn resolves_memory_file_within_claude_directory() {
-        let path = resolve_memory_file_path();
-        assert_eq!(path.file_name().and_then(|n| n.to_str()), Some(".swarm-memory.json"));
-        assert_eq!(path.parent().and_then(|p| p.file_name()).and_then(|n| n.to_str()), Some(".claude"));
+    fn memory_path_uses_project_claude_dir_when_present() {
+        let project_root = unique_temp_dir("project");
+        let home = unique_temp_dir("home");
+        fs::create_dir_all(project_root.join(".claude")).expect("project .claude/ should exist");
+
+        let path = resolve_memory_file_path_with(Some(&project_root), &home);
+
+        assert_eq!(path, project_root.join(".claude").join(".swarm-memory.json"));
+        fs::remove_dir_all(&project_root).expect("project temp cleanup");
+    }
+
+    #[test]
+    fn memory_path_falls_back_to_home_when_project_claude_missing() {
+        let project_root = unique_temp_dir("project-no-claude");
+        fs::create_dir_all(&project_root).expect("project root should exist");
+        let home = unique_temp_dir("home");
+
+        let path = resolve_memory_file_path_with(Some(&project_root), &home);
+
+        assert_eq!(path, home.join(".claude").join(".swarm-memory.json"));
+        // Pure function must NOT have created the project .claude/ — that was
+        // exactly the silent-pollution bug this fix exists to close.
+        assert!(!project_root.join(".claude").exists());
+        fs::remove_dir_all(&project_root).expect("project temp cleanup");
+    }
+
+    #[test]
+    fn memory_path_uses_home_when_no_project_root() {
+        let home = unique_temp_dir("home");
+        let path = resolve_memory_file_path_with(None, &home);
+        assert_eq!(path, home.join(".claude").join(".swarm-memory.json"));
     }
 }
