@@ -1,5 +1,5 @@
 use anyhow::{bail, Context, Result};
-use chromiumoxide::{Element, Page};
+use chromiumoxide::Page;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 
@@ -24,21 +24,70 @@ fn preview_text(text: &str, max_chars: usize) -> String {
     out
 }
 
-async fn element_inner_text(element: &Element) -> String {
-    element
-        .inner_text()
-        .await
-        .ok()
-        .flatten()
-        .unwrap_or_default()
-}
-
-/// Whitespace normaliser shared by both response filters. Browser's `innerText`
-/// preserves `\n` between block elements (paragraphs, lists), so a raw `!=`
-/// against the already-collapsed prompt always passes and the user bubble
-/// gets returned as if it were Grok's reply. Both sides must collapse.
+/// Whitespace normaliser. Browser's `innerText` preserves `\n` between block
+/// elements (paragraphs, lists), so a raw `!=` against the already-collapsed
+/// prompt always passes and the user bubble gets returned as if it were
+/// Grok's reply. Both sides must collapse.
 fn normalise_ws(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// Pull the latest response candidate from the page in a single CDP round-trip.
+///
+/// Force-opens any closed `<details>` first — `innerText` follows the browser
+/// spec and skips closed-`<details>` content, which dropped Grok's bullets-
+/// under-headers (Survivors:, Rollbacks:) from the captured reply. With them
+/// open, every visible block contributes to the returned text.
+///
+/// Two-element gate is enforced in JS (matches the prior Rust loop): the user
+/// bubble and the assistant bubble share the same selector, so a single match
+/// is by definition the user echo, not yet a response.
+async fn extract_response_candidate(
+    page: &Page,
+    selector: &str,
+    prompt_trimmed: &str,
+) -> Option<String> {
+    let selector_literal = serde_json::to_string(selector).ok()?;
+    let prompt_literal = serde_json::to_string(prompt_trimmed).ok()?;
+    let js = format!(
+        r#"(() => {{
+          const els = Array.from(document.querySelectorAll({selector_literal}));
+          if (els.length < 2) return '';
+          const normalise = (s) => s.split(/\s+/).filter(Boolean).join(' ');
+          for (let i = els.length - 1; i >= 0; i--) {{
+            const el = els[i];
+            el.querySelectorAll('details:not([open])').forEach((d) => (d.open = true));
+            const text = (el.innerText || '').trim();
+            if (text && normalise(text) !== {prompt_literal}) {{
+              return text;
+            }}
+          }}
+          return '';
+        }})()"#
+    );
+    let value = page.evaluate(js).await.ok()?;
+    value.into_value::<String>().ok()
+}
+
+/// Count block-level content (`<p>` + `<li>`) in the latest response container.
+/// Bullets are first-class content for Grok responses; counting only `<p>`
+/// understated how much of the reply is structured material.
+async fn count_response_blocks(page: &Page, selector: &str) -> usize {
+    let Ok(selector_literal) = serde_json::to_string(selector) else {
+        return 0;
+    };
+    let js = format!(
+        r#"(() => {{
+          const els = document.querySelectorAll({selector_literal});
+          if (!els.length) return 0;
+          const last = els[els.length - 1];
+          return last.querySelectorAll('p, li').length;
+        }})()"#
+    );
+    let Ok(value) = page.evaluate(js).await else {
+        return 0;
+    };
+    value.into_value::<f64>().map(|n| n as usize).unwrap_or(0)
 }
 
 async fn wait_for_stable_response_text(
@@ -59,26 +108,10 @@ async fn wait_for_stable_response_text(
     let mut stable_ticks = 0_u8;
 
     loop {
-        let mut newest_candidate = String::new();
-        if let Ok(elements) = page.find_elements(response_selector).await {
-            // Grok's `[id^="response-"] .message-bubble` matches BOTH the user
-            // bubble (typed prompt) and the assistant bubble (Grok's reply).
-            // With a single match, the only thing to read is the user echo —
-            // which is by definition not yet a response. Wait for at least
-            // two matching elements before accepting any candidate.
-            if elements.len() >= 2 {
-                for element in elements.into_iter().rev() {
-                    let text = element_inner_text(&element).await;
-                    let candidate = text.trim();
-                    if !candidate.is_empty() && normalise_ws(candidate) != prompt_trimmed {
-                        newest_candidate = candidate.to_string();
-                        break;
-                    }
-                }
-            }
-        }
-
-        let candidate = newest_candidate.trim();
+        let candidate = extract_response_candidate(page, response_selector, &prompt_trimmed)
+            .await
+            .unwrap_or_default();
+        let candidate = candidate.trim();
 
         if !candidate.is_empty() && normalise_ws(candidate) != prompt_trimmed {
             if candidate == last_candidate {
@@ -124,52 +157,20 @@ pub async fn collect_response_details(
     prompt: &str,
     timeout_ms: u64,
 ) -> Result<ResponseDetails> {
-    // Wait for stable text BEFORE counting <p>s. The container can become visible
-    // a beat before its paragraph children finish rendering during streaming —
-    // bailing on an empty <p> count here would fire a false negative.
-    let raw_stable_text = wait_for_stable_response_text(page, response_selector, prompt, timeout_ms)
+    // wait_for_stable_response_text now force-opens <details> and reads the
+    // full innerText of the assistant turn, including bullets. The previous
+    // <p>-only walk that built `merged` here dropped <li> siblings of <p>
+    // entirely — that walk is gone. Stable text is canonical.
+    let answer = wait_for_stable_response_text(page, response_selector, prompt, timeout_ms)
         .await
         .context("Failed while waiting for stable response text")?;
 
-    let response_element = page
-        .find_elements(response_selector)
-        .await
-        .unwrap_or_default()
-        .into_iter()
-        .rev()
-        .next();
-
-    let paragraphs = if let Some(element) = response_element.as_ref() {
-        element.find_elements("p").await.unwrap_or_default()
-    } else {
-        Vec::new()
-    };
-    let paragraph_count = paragraphs.len();
-
-    let mut paragraph_texts = Vec::new();
-    for p in &paragraphs {
-        if let Ok(Some(t)) = p.inner_text().await {
-            paragraph_texts.push(t);
-        }
-    }
-
-    let merged = paragraph_texts
-        .into_iter()
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>()
-        .join("\n\n");
-
-    let answer = if !merged.is_empty() && normalise_ws(&merged) != normalise_ws(prompt) {
-        merged
-    } else {
-        raw_stable_text
-    };
+    let paragraph_count = count_response_blocks(page, response_selector).await;
 
     Ok(ResponseDetails {
-        paragraph_count,
         char_count: answer.chars().count(),
         preview: preview_text(&answer, 240),
+        paragraph_count,
         answer,
     })
 }
