@@ -1,0 +1,24 @@
+[package]
+name = "watch-feeds-cli"
+version = "0.1.0"
+edition = "2024"
+description = "RSS / Atom / JSON Feed scanner with one-shot and daemon modes. Posts deltas to the BorAI inbox or stdout."
+
+# Explicit version pins (rather than workspace inheritance) so this crate
+# builds standalone — matching the ask-grok-cli convention in this monorepo
+# while the workspace Cargo.toml itself remains untracked.
+[dependencies]
+anyhow = "1.0.102"
+clap = { version = "4.6.1", features = ["derive"] }
+colored = "3.1.1"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
+tokio = { version = "1.52.1", features = ["macros", "rt-multi-thread"] }
+reqwest = { version = "0.12.9", features = ["rustls-tls"], default-features = false }
+feed-rs = "2.3.1"
+rusqlite = { version = "0.32.1", features = ["bundled", "chrono"] }
+chrono = { version = "0.4.39", features = ["serde"] }
+
+[[bin]]
+name = "watch-feeds-cli"
+path = "src/main.rs"
