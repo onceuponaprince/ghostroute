@@ -1,0 +1,15 @@
+[package]
+name = "ghostroute-browser"
+version = "0.1.0"
+edition = "2024"
+description = "Shared chromiumoxide bootstrap, stealth, cookies, and human-behaviour helpers for the ghostroute CLI family."
+
+[dependencies]
+chromiumoxide.workspace = true
+tokio.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+futures.workspace = true
+rand.workspace = true
+anyhow.workspace = true
+colored.workspace = true
