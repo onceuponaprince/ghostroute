@@ -236,12 +236,14 @@ pub async fn scrape_once(
     submit_prompt(page, prompt).await?;
 
     let deep = tool == Some("deep-research");
-    wait_for_answer_stable(page, deep, on_progress).await?;
+    if let Err(e) = wait_for_answer_stable(page, deep, on_progress).await {
+        eprintln!("[ask-perplexity] wait timed out, salvaging partial DOM: {e}");
+    }
 
     if deep {
         human_pause(2_000, 4_000).await;
     }
-    open_sources_overlay(page).await?;
+    let _ = open_sources_overlay(page).await;
 
     let html = page
         .content()
